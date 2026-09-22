@@ -65,7 +65,6 @@ ALL_32_TEAMS = {
 
 ABBREV_TO_INFO = {v["abbrev"]: {"name": k, "id": v["id"]} for k, v in ALL_32_TEAMS.items()}
 
-# Built-in official week matrix fallback ensuring zero blank-screen errors
 WEEKLY_SCHEDULE_BACKUP = {
     1: [("BAL", "KC"), ("GB", "PHI"), ("PIT", "ATL"), ("ARI", "BUF"), ("TEN", "CHI"), ("NE", "CIN"), ("HOU", "IND"), ("JAX", "MIA"), ("CAR", "NO"), ("MIN", "NYG"), ("LV", "LAC"), ("DEN", "SEA"), ("DAL", "CLE"), ("WAS", "TB"), ("LAR", "DET"), ("NYJ", "SF")],
     2: [("BUF", "MIA"), ("LV", "BAL"), ("LAC", "CAR"), ("NO", "DAL"), ("TB", "DET"), ("IND", "GB"), ("CLE", "JAX"), ("NYG", "WAS"), ("SF", "MIN"), ("SEA", "NE"), ("NYJ", "TEN"), ("CIN", "KC"), ("LAR", "ARI"), ("PIT", "DEN"), ("CHI", "HOU"), ("ATL", "PHI")],
@@ -79,9 +78,7 @@ WEEKLY_SCHEDULE_BACKUP = {
 
 @st.cache_data(ttl=20)
 def fetch_week_schedule(week_num: int):
-    """Fetches matchup schedule with fallback to backup schedule matrix"""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    # Query ESPN scoreboard using verified season and week parameters
     url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=2024&seasontype=2&week={week_num}"
     try:
         r = requests.get(url, headers=headers, timeout=5)
@@ -91,17 +88,6 @@ def fetch_week_schedule(week_num: int):
                 return events
     except Exception:
         pass
-    
-    # Live scoreboard check (if currently in-season)
-    try:
-        r_live = requests.get("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard", headers=headers, timeout=5)
-        if r_live.status_code == 200:
-            data = r_live.json()
-            if data.get("week", {}).get("number") == week_num:
-                return data.get("events", [])
-    except Exception:
-        pass
-
     return []
 
 @st.cache_data(ttl=1800)
@@ -138,15 +124,40 @@ def fetch_live_espn_roster(team_id: str):
     return []
 
 # ---------------------------------------------------------
-# WORKSTATION HEADER & MATCHUP SELECTION
+# NEW LOGO & WORKSTATION HEADER
 # ---------------------------------------------------------
-st.title("⚡ NextDrive Matchup Workstation")
-st.caption("Matchup Slate Analyzer with Automated Possession & Situational Micro-Props")
+st.markdown("""
+<div style="display: flex; align-items: center; gap: 16px; padding: 10px 0 16px 0;">
+  <svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="60" height="60" rx="14" fill="#141820" stroke="#262D3D" stroke-width="2"/>
+    <rect x="12" y="24" width="4" height="12" rx="2" fill="#3D4B63"/>
+    <rect x="20" y="19" width="4" height="22" rx="2" fill="#6B7F9E"/>
+    <path d="M28 14L46 30L28 46L32 32H25L32 14H28Z" fill="url(#grad_bolt)"/>
+    <defs>
+      <linearGradient id="grad_bolt" x1="25" y1="14" x2="46" y2="46" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FF5E3A"/>
+        <stop offset="1" stop-color="#FF2A54"/>
+      </linearGradient>
+    </defs>
+  </svg>
+  <div>
+    <h1 style="margin: 0; padding: 0; font-size: 2.1rem; font-weight: 900; letter-spacing: -0.5px; line-height: 1.1;">
+      NEXT<span style="color: #FF4B4B;">DRIVE</span>
+    </h1>
+    <p style="margin: 0; padding: 0; font-size: 0.8rem; font-weight: 700; color: #7C8BA1; letter-spacing: 1.5px; text-transform: uppercase;">
+      Matchup Slate Analyzer & In-Game Possession Intelligence
+    </p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
+# ---------------------------------------------------------
+# SCHEDULE & MATCHUP SELECTION
+# ---------------------------------------------------------
 c_week, c_game = st.columns([1, 3])
 
 with c_week:
-    selected_week = st.selectbox("NFL Week", list(range(1, 19)), index=3) # Defaults to Week 4
+    selected_week = st.selectbox("NFL Week", list(range(1, 19)), index=3)
 
 events = fetch_week_schedule(selected_week)
 matchup_options = {}
@@ -184,7 +195,6 @@ if events:
                 "possession": comp.get("situation", {}).get("possession")
             }
 else:
-    # Guaranteed schedule matrix fallback
     pairs = WEEKLY_SCHEDULE_BACKUP.get(selected_week, [("KC", "SF"), ("BAL", "PIT"), ("BUF", "MIA"), ("DET", "GB")])
     for a_abbr, h_abbr in pairs:
         a_info = ABBREV_TO_INFO.get(a_abbr, {"name": a_abbr, "id": "1"})
@@ -196,7 +206,7 @@ else:
             "home_name": h_info["name"],
             "away_name": a_info["name"],
             "home_id": h_info["id"],
-            "away_id": a_info["id"],
+            "away_id": h_info["id"],
             "home_score": 0,
             "away_score": 0,
             "state": "pre",
@@ -231,7 +241,6 @@ off_id = m["home_id"] if is_home else m["away_id"]
 def_abbr = m["away_abbr"] if is_home else m["home_abbr"]
 score_diff = (m["home_score"] - m["away_score"]) if is_home else (m["away_score"] - m["home_score"])
 
-# Yardline & Clock setup
 yardline_100 = m["yardLine"] if m["state"] == "in" else 75
 field_start = f"Own {100 - yardline_100}" if yardline_100 > 50 else f"Opp {yardline_100}"
 qtr = m["period"] if m["state"] == "in" else 2
