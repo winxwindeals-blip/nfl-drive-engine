@@ -74,54 +74,58 @@ def fetch_live_scoreboard():
         pass
     return []
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=300)
 def fetch_team_roster(team_id: str):
-    """Fetches real-time active offensive skill players via ESPN depth chart & roster endpoints"""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    offense = []
-
-    # 1. Primary Attempt: ESPN Depth Chart API
-    dc_url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/depthcharts"
+    """Pulls current offensive skill players from ESPN team profile with enabled roster"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}?enable=roster"
+    
     try:
-        r = requests.get(dc_url, headers=headers, timeout=5)
+        r = requests.get(url, headers=headers, timeout=6)
         if r.status_code == 200:
             data = r.json()
-            items = data.get("depthchart", [])
-            target_slots = {"qb": "QB", "rb": "RB", "wr": "WR", "te": "TE", "fb": "FB"}
-            for slot in items:
-                pos_key = str(slot.get("name", "")).lower()
-                if pos_key in target_slots:
-                    std_pos = target_slots[pos_key]
-                    for ath_entry in slot.get("athletes", []):
-                        ath = ath_entry.get("athlete", ath_entry)
-                        name = ath.get("displayName") or ath.get("fullName")
-                        if name:
-                            offense.append({
-                                "name": name,
-                                "pos": std_pos,
-                                "jersey": str(ath.get("jersey", "--"))
-                            })
+            team_obj = data.get("team", {})
+            athletes_list = team_obj.get("record", {}).get("items", []) or team_obj.get("athletes", [])
+            
+            # Alternative nested athlete search
+            if not athletes_list and "roster" in team_obj:
+                athletes_list = team_obj.get("roster", {}).get("entries", [])
+
+            offense = []
+            valid_positions = {"QB", "RB", "WR", "TE", "FB"}
+            
+            for item in athletes_list:
+                ath = item.get("athlete", item)
+                pos = ath.get("position", {}).get("abbreviation", "")
+                if pos in valid_positions:
+                    offense.append({
+                        "name": ath.get("displayName") or ath.get("fullName", "Player"),
+                        "pos": pos,
+                        "jersey": str(ath.get("jersey", "--"))
+                    })
             if offense:
                 return offense
     except Exception:
         pass
 
-    # 2. Secondary Attempt: ESPN Team Roster API
-    r_url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
+    # Direct Athletes Endpoint Fallback
     try:
-        r = requests.get(r_url, headers=headers, timeout=5)
-        if r.status_code == 200:
-            data = r.json()
-            for grp in data.get("athletes", []):
-                for ath in grp.get("items", []):
-                    pos = ath.get("position", {}).get("abbreviation", "")
-                    if pos in ["QB", "RB", "WR", "TE", "FB"]:
-                        name = ath.get("fullName") or ath.get("displayName")
-                        if name:
+        r2 = requests.get(f"https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/seasons/2024/teams/{team_id}/athletes?limit=50", headers=headers, timeout=6)
+        if r2.status_code == 200:
+            items = r2.json().get("items", [])
+            offense = []
+            for ref in items[:25]:
+                p_url = ref.get("$ref")
+                if p_url:
+                    p_res = requests.get(p_url, headers=headers, timeout=3)
+                    if p_res.status_code == 200:
+                        p_data = p_res.json()
+                        pos = p_data.get("position", {}).get("abbreviation", "")
+                        if pos in valid_positions:
                             offense.append({
-                                "name": name,
+                                "name": p_data.get("displayName", "Player"),
                                 "pos": pos,
-                                "jersey": str(ath.get("jersey", "--"))
+                                "jersey": str(p_data.get("jersey", "--"))
                             })
             if offense:
                 return offense
@@ -255,14 +259,23 @@ with tab_drive:
 with tab_team:
     st.subheader("Live Official Team Rosters & Personnel Micro-Props")
     
-    selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()), index=26) # Defaults to Pittsburgh Steelers
+    col_sel, col_btn = st.columns([4, 1])
+    with col_sel:
+        selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()), index=26)
+    with col_btn:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Clear Cache"):
+            st.cache_data.clear()
+            st.rerun()
+
     team_info = ALL_32_TEAMS[selected_team_name]
     
-    with st.spinner(f"Fetching current roster for {selected_team_name}..."):
+    with st.spinner(f"Loading {selected_team_name} roster..."):
         roster = fetch_team_roster(team_info["id"])
     
     if not roster:
-        st.warning(f"Roster details temporarily syncing from ESPN for {selected_team_name}. You can still use the prop calculator below.")
+        st.warning(f"Roster details temporarily syncing from ESPN for {selected_team_name}. Click 'Clear Cache' above to force a live refresh.")
         skill_options = ["Primary WR1", "Slot WR / WR2", "Pass-Catching TE", "Starting RB"]
     else:
         qbs = [p for p in roster if p["pos"] == "QB"]
@@ -294,7 +307,6 @@ with tab_team:
     st.subheader("🎯 Drive Micro-Prop Estimator")
     st.caption(f"Estimated for upcoming drive starting at **{field_start}**")
 
-    # Plays expectancy model based on start territory
     est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
 
     p_col1, p_col2 = st.columns(2)
