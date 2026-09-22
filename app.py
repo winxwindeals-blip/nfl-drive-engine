@@ -113,7 +113,7 @@ def fetch_live_espn_roster(team_id: str):
 # HEADER & DATA INGESTION
 # ---------------------------------------------------------
 st.title("⚡ NextDrive Workstation")
-st.caption("Real-Time NFL Possession Probabilities & Live Player Micro-Props Powered by ESPN Live Data")
+st.caption("Real-Time Possession Engine with Automated Production & Situational Value Recommendations")
 
 events = fetch_live_scoreboard()
 live_games = {}
@@ -159,10 +159,10 @@ if live_games:
         poss_team_abbr = away.get("team", {}).get("abbreviation", "OFF")
 
     field_start = f"Own {100 - yardline_100}" if yardline_100 > 50 else f"Opp {yardline_100}"
-    st.info(f"🏈 **Live Situation Ingested:** {selected_game} | Possession: **{poss_team_abbr}** | Ball on: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
+    st.info(f"🏈 **Live Game Ingestion:** {selected_game} | Possession: **{poss_team_abbr}** | Ball on: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
 
 else:
-    st.warning("📡 **Scoreboard Standby:** No NFL games currently kicking off. Operating on standard game defaults (touchback territory, tied margin).")
+    st.warning("📡 **Scoreboard Standby:** No NFL games active right now. Operating on standard baseline defaults (touchback territory, tied margin).")
     qtr = 2
     clock_str = "8:00"
     qtr_seconds = 480
@@ -190,8 +190,105 @@ results = sorted(zip(classes, probs), key=lambda x: x[1], reverse=True)
 # Expected plays on this possession based on field territory
 est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
 
+# Dynamic Pass/Run situational lean
+pass_rate = 0.58
+if score_diff <= -8 and qtr >= 3:
+    pass_rate = 0.72
+elif score_diff >= 8 and qtr >= 3:
+    pass_rate = 0.42
+run_rate = 1.0 - pass_rate
+
 # ---------------------------------------------------------
-# UNIFIED DUAL-COLUMN WORKSTATION
+# AUTO-SYNC TEAM ROSTER
+# ---------------------------------------------------------
+default_team_name = ABBREV_TO_NAME.get(poss_team_abbr, "Kansas City Chiefs")
+all_team_list = list(ALL_32_TEAMS.keys())
+default_idx = all_team_list.index(default_team_name) if default_team_name in all_team_list else 15
+
+c_sel, c_ref = st.columns([5, 1])
+with c_sel:
+    selected_team_name = st.selectbox("Offense on Field", all_team_list, index=default_idx)
+with c_ref:
+    st.write("")
+    st.write("")
+    if st.button("🔄 Reload"):
+        st.cache_data.clear()
+        st.rerun()
+
+team_data = ALL_32_TEAMS[selected_team_name]
+roster_players = fetch_live_espn_roster(team_data["id"])
+
+wrs = [p for p in roster_players if p["pos"] == "WR"] if roster_players else []
+tes = [p for p in roster_players if p["pos"] == "TE"] if roster_players else []
+rbs = [p for p in roster_players if p["pos"] in ["RB", "FB"]] if roster_players else []
+qbs = [p for p in roster_players if p["pos"] == "QB"] if roster_players else []
+
+# ---------------------------------------------------------
+# ⭐ SUGGESTED VALUE SPOTS CARD (NEW SECTION)
+# ---------------------------------------------------------
+st.markdown("### 🔥 NextDrive Suggested Value Spotlights")
+
+if roster_players:
+    top_wr = wrs[0] if wrs else None
+    top_rb = rbs[0] if rbs else None
+
+    # Calculate live probabilities for top options
+    rec_prob_1 = 0.0
+    rec_prob_2 = 0.0
+    rush_prob_5 = 0.0
+    rush_prob_10 = 0.0
+
+    if top_wr:
+        exp_tg = est_plays * pass_rate * 0.25
+        exp_ct = exp_tg * 0.68
+        rec_prob_1 = 1.0 - math.exp(-exp_ct)
+        rec_prob_2 = max(0.0, min(0.99, 1.0 - math.exp(-exp_ct) * (1.0 + exp_ct)))
+
+    if top_rb:
+        exp_car = est_plays * run_rate * 0.68
+        rush_prob_5 = min(0.98, 1.0 - math.exp(-exp_car * 0.72))
+        rush_prob_10 = min(0.95, 1.0 - math.exp(-exp_car * 0.42))
+
+    s1, s2, s3 = st.columns(3)
+    
+    with s1:
+        st.success("🎯 **Top Volume Floor (Safest Hit)**")
+        if rush_prob_5 >= rec_prob_1 and top_rb:
+            st.markdown(f"**#{top_rb['jersey']} {top_rb['name']} (RB1)**")
+            st.write(f"• **5+ Rushing Yards:** **{rush_prob_5 * 100:.1f}%** (`{prob_to_american(rush_prob_5)}`)")
+            st.caption(f"Lead carry share ({exp_car:.1f} exp carries) gives highest statistical floor.")
+        elif top_wr:
+            st.markdown(f"**#{top_wr['jersey']} {top_wr['name']} (WR1)**")
+            st.write(f"• **1+ Reception:** **{rec_prob_1 * 100:.1f}%** (`{prob_to_american(rec_prob_1)}`)")
+            st.caption(f"Primary target share (~25%) projected for {exp_tg:.1f} targets on this drive.")
+
+    with s2:
+        st.info("🚀 **Top Plus-Money Value (Ceiling)**")
+        if top_wr:
+            st.markdown(f"**#{top_wr['jersey']} {top_wr['name']} (WR1)**")
+            st.write(f"• **2+ Receptions:** **{rec_prob_2 * 100:.1f}%** (`{prob_to_american(rec_prob_2)}`)")
+            st.caption(f"Strong plus-money conversion rate if drive extends past 5 plays.")
+        elif top_rb:
+            st.markdown(f"**#{top_rb['jersey']} {top_rb['name']} (RB1)**")
+            st.write(f"• **10+ Rushing Yards:** **{rush_prob_10 * 100:.1f}%** (`{prob_to_american(rush_prob_10)}`)")
+            st.caption("Explosive run probability given starting territory.")
+
+    with s3:
+        st.warning("📋 **Situational Context & Lean**")
+        if score_diff <= -8 and qtr >= 3:
+            st.write("• **Trailing Game Script:** Pass rate elevated to **~72%**; targets funnel heavily toward WRs.")
+        elif score_diff >= 8 and qtr >= 3:
+            st.write("• **Leading Game Script:** Run rate elevated to **~58%**; clock burn heavily favors RB1 touches.")
+        else:
+            st.write(f"• **Neutral Game Script:** Balanced split ({pass_rate*100:.0f}% Pass / {run_rate*100:.0f}% Run) from **{field_start}**.")
+        st.caption(f"Drive expectancy: ~{est_plays} scrimmage plays.")
+else:
+    st.info("Roster data syncing...")
+
+st.divider()
+
+# ---------------------------------------------------------
+# DUAL-COLUMN WORKSTATION
 # ---------------------------------------------------------
 col_drive, col_divider, col_prop = st.columns([10, 1, 11])
 
@@ -238,38 +335,13 @@ with col_drive:
 with col_divider:
     st.write("")
 
-# === RIGHT PANEL: PLAYER MICRO-PROPS ===
+# === RIGHT PANEL: ALL PLAYER PROPS ===
 with col_prop:
-    st.subheader("🎯 Player Drive Micro-Props")
-    
-    # Auto-sync offense on field to the live possession team
-    default_team_name = ABBREV_TO_NAME.get(poss_team_abbr, "Kansas City Chiefs")
-    all_team_list = list(ALL_32_TEAMS.keys())
-    default_idx = all_team_list.index(default_team_name) if default_team_name in all_team_list else 15
+    st.subheader("🎯 All Player Micro-Props")
 
-    row_team, row_refresh = st.columns([4, 1])
-    with row_team:
-        selected_team_name = st.selectbox("Offense on Field", all_team_list, index=default_idx)
-    with row_refresh:
-        st.write("")
-        st.write("")
-        if st.button("🔄 Refresh"):
-            st.cache_data.clear()
-            st.rerun()
-
-    team_data = ALL_32_TEAMS[selected_team_name]
-    
-    with st.spinner(f"Loading {selected_team_name} active roster..."):
-        roster_players = fetch_live_espn_roster(team_data["id"])
-        
     if not roster_players:
         st.warning("Connecting to active roster...")
     else:
-        wrs = [p for p in roster_players if p["pos"] == "WR"]
-        tes = [p for p in roster_players if p["pos"] == "TE"]
-        rbs = [p for p in roster_players if p["pos"] in ["RB", "FB"]]
-        qbs = [p for p in roster_players if p["pos"] == "QB"]
-
         tab_rec, tab_rush = st.tabs(["🏈 Reception Props", "🏃 Rushing Props"])
         
         with tab_rec:
@@ -287,10 +359,10 @@ with col_prop:
             chosen_target = st.selectbox("Select Pass Catcher", list(pass_options.keys()), index=0)
             target_share = pass_options[chosen_target]
             
-            exp_targets = est_plays * 0.58 * target_share
+            exp_targets = est_plays * pass_rate * target_share
             exp_catches = exp_targets * 0.68
             
-            st.caption(f"Live Ingested Opportunity: **{target_share * 100:.0f}%** Target Share (~{exp_targets:.2f} targets)")
+            st.caption(f"Situational Opportunity: **{target_share * 100:.0f}%** Target Share (~{exp_targets:.2f} targets)")
 
             r_col1, r_col2 = st.columns(2)
             prob_1_catch = 1.0 - math.exp(-exp_catches)
@@ -311,8 +383,8 @@ with col_prop:
             chosen_rusher = st.selectbox("Select Ball Carrier", list(rush_options.keys()), index=0)
             carry_share = rush_options[chosen_rusher]
             
-            exp_carries = est_plays * 0.42 * carry_share
-            st.caption(f"Live Ingested Opportunity: **{carry_share * 100:.0f}%** Carry Share (~{exp_carries:.2f} carries)")
+            exp_carries = est_plays * run_rate * carry_share
+            st.caption(f"Situational Opportunity: **{carry_share * 100:.0f}%** Carry Share (~{exp_carries:.2f} carries)")
 
             ru_col1, ru_col2 = st.columns(2)
             prob_5_rush = min(0.98, 1.0 - math.exp(-exp_carries * 0.72))
