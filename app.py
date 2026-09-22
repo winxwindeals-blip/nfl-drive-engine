@@ -26,41 +26,41 @@ def load_engine():
 model, feature_cols, classes = load_engine()
 
 # ---------------------------------------------------------
-# RELIABLE 32-TEAM DIRECTORY
+# RELIABLE 32-TEAM DIRECTORY (ESPN Team IDs)
 # ---------------------------------------------------------
 ALL_32_TEAMS = {
-    "Arizona Cardinals": "ARI",
-    "Atlanta Falcons": "ATL",
-    "Baltimore Ravens": "BAL",
-    "Buffalo Bills": "BUF",
-    "Carolina Panthers": "CAR",
-    "Chicago Bears": "CHI",
-    "Cincinnati Bengals": "CIN",
-    "Cleveland Browns": "CLE",
-    "Dallas Cowboys": "DAL",
-    "Denver Broncos": "DEN",
-    "Detroit Lions": "DET",
-    "Green Bay Packers": "GB",
-    "Houston Texans": "HOU",
-    "Indianapolis Colts": "IND",
-    "Jacksonville Jaguars": "JAX",
-    "Kansas City Chiefs": "KC",
-    "Las Vegas Raiders": "LV",
-    "Los Angeles Chargers": "LAC",
-    "Los Angeles Rams": "LAR",
-    "Miami Dolphins": "MIA",
-    "Minnesota Vikings": "MIN",
-    "New England Patriots": "NE",
-    "New Orleans Saints": "NO",
-    "New York Giants": "NYG",
-    "New York Jets": "NYJ",
-    "Philadelphia Eagles": "PHI",
-    "Pittsburgh Steelers": "PIT",
-    "San Francisco 49ers": "SF",
-    "Seattle Seahawks": "SEA",
-    "Tampa Bay Buccaneers": "TB",
-    "Tennessee Titans": "TEN",
-    "Washington Commanders": "WAS"
+    "Arizona Cardinals": {"id": "22", "abbrev": "ARI"},
+    "Atlanta Falcons": {"id": "1", "abbrev": "ATL"},
+    "Baltimore Ravens": {"id": "33", "abbrev": "BAL"},
+    "Buffalo Bills": {"id": "2", "abbrev": "BUF"},
+    "Carolina Panthers": {"id": "29", "abbrev": "CAR"},
+    "Chicago Bears": {"id": "3", "abbrev": "CHI"},
+    "Cincinnati Bengals": {"id": "4", "abbrev": "CIN"},
+    "Cleveland Browns": {"id": "5", "abbrev": "CLE"},
+    "Dallas Cowboys": {"id": "6", "abbrev": "DAL"},
+    "Denver Broncos": {"id": "7", "abbrev": "DEN"},
+    "Detroit Lions": {"id": "8", "abbrev": "DET"},
+    "Green Bay Packers": {"id": "9", "abbrev": "GB"},
+    "Houston Texans": {"id": "34", "abbrev": "HOU"},
+    "Indianapolis Colts": {"id": "11", "abbrev": "IND"},
+    "Jacksonville Jaguars": {"id": "30", "abbrev": "JAX"},
+    "Kansas City Chiefs": {"id": "12", "abbrev": "KC"},
+    "Las Vegas Raiders": {"id": "13", "abbrev": "LV"},
+    "Los Angeles Chargers": {"id": "24", "abbrev": "LAC"},
+    "Los Angeles Rams": {"id": "14", "abbrev": "LAR"},
+    "Miami Dolphins": {"id": "15", "abbrev": "MIA"},
+    "Minnesota Vikings": {"id": "16", "abbrev": "MIN"},
+    "New England Patriots": {"id": "17", "abbrev": "NE"},
+    "New Orleans Saints": {"id": "18", "abbrev": "NO"},
+    "New York Giants": {"id": "19", "abbrev": "NYG"},
+    "New York Jets": {"id": "20", "abbrev": "NYJ"},
+    "Philadelphia Eagles": {"id": "21", "abbrev": "PHI"},
+    "Pittsburgh Steelers": {"id": "23", "abbrev": "PIT"},
+    "San Francisco 49ers": {"id": "25", "abbrev": "SF"},
+    "Seattle Seahawks": {"id": "26", "abbrev": "SEA"},
+    "Tampa Bay Buccaneers": {"id": "27", "abbrev": "TB"},
+    "Tennessee Titans": {"id": "10", "abbrev": "TEN"},
+    "Washington Commanders": {"id": "28", "abbrev": "WAS"}
 }
 
 @st.cache_data(ttl=20)
@@ -74,23 +74,44 @@ def fetch_live_scoreboard():
         pass
     return []
 
-@st.cache_data(ttl=3600)
-def fetch_active_rosters():
-    """Loads official active NFL rosters via nflverse cloud mirror (fast, guaranteed cloud delivery)"""
-    url = "https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_2024.csv"
-    try:
-        df = pd.read_csv(url, usecols=["team", "full_name", "position", "jersey_number", "status"])
-        df = df[df["status"].isin(["ACT", "Active", "act"])].copy()
-        df = df[df["position"].isin(["QB", "RB", "WR", "TE", "FB"])].copy()
-        return df
-    except Exception:
-        # Emergency secondary mirror
+@st.cache_data(ttl=300)
+def fetch_live_espn_roster(team_id: str):
+    """Pulls current live active roster directly from ESPN API"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+    endpoints = [
+        f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster",
+        f"https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
+    ]
+    
+    for url in endpoints:
         try:
-            url_alt = "https://raw.githubusercontent.com/leesharpe/nfldata/master/data/rosters.csv"
-            df_alt = pd.read_csv(url_alt)
-            return df_alt
+            r = requests.get(url, headers=headers, timeout=6)
+            if r.status_code == 200:
+                data = r.json()
+                athletes_groups = data.get("athletes", [])
+                skill_players = []
+                target_positions = {"QB", "RB", "WR", "TE", "FB"}
+                
+                for group in athletes_groups:
+                    items = group.get("items", [])
+                    for ath in items:
+                        pos = ath.get("position", {}).get("abbreviation", "").upper()
+                        if pos in target_positions:
+                            name = ath.get("fullName") or ath.get("displayName") or "Player"
+                            jersey = str(ath.get("jersey", "--"))
+                            skill_players.append({
+                                "name": name,
+                                "pos": pos,
+                                "jersey": jersey
+                            })
+                if skill_players:
+                    return skill_players
         except Exception:
-            return pd.DataFrame()
+            continue
+    return []
 
 # ---------------------------------------------------------
 # APP HEADER
@@ -215,65 +236,53 @@ with tab_drive:
 # TAB 2: LIVE ROSTERS & MICRO-PROPS
 # ---------------------------------------------------------
 with tab_team:
-    st.subheader("Official Active Rosters & Drive Micro-Props")
+    st.subheader("Official Live Team Rosters & Personnel Micro-Props")
     
     col_sel, col_btn = st.columns([4, 1])
     with col_sel:
-        selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()), index=12) # Defaults to Houston Texans
+        selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()), index=26)
     with col_btn:
         st.write("")
         st.write("")
-        if st.button("🔄 Refresh Data"):
+        if st.button("🔄 Refresh Roster"):
             st.cache_data.clear()
             st.rerun()
 
-    team_abbr = ALL_32_TEAMS[selected_team_name]
-    rosters_df = fetch_active_rosters()
+    team_data = ALL_32_TEAMS[selected_team_name]
     
-    team_roster = pd.DataFrame()
-    if not rosters_df.empty and "team" in rosters_df.columns:
-        team_roster = rosters_df[rosters_df["team"] == team_abbr].copy()
-
-    if team_roster.empty:
-        st.warning(f"Connecting to live database for {selected_team_name}...")
-        skill_options = ["Lead WR1", "Slot / WR2", "Starting TE", "Starting RB"]
-        rush_options = ["Lead RB", "RB2 / Change of Pace", "Dual-Threat QB"]
+    with st.spinner(f"Pulling live active roster for {selected_team_name}..."):
+        roster_players = fetch_live_espn_roster(team_data["id"])
+    
+    if not roster_players:
+        st.warning(f"Roster details momentarily unavailable for {selected_team_name}. Click 'Refresh Roster' to reload.")
+        skill_options = ["WR1 (Primary Target)", "WR2 (Field Stretcher)", "Starting TE", "Starting RB"]
+        rush_options = ["Starting RB", "Backup RB", "Quarterback"]
     else:
-        qbs = team_roster[team_roster["position"] == "QB"]
-        rbs = team_roster[team_roster["position"].isin(["RB", "FB"])]
-        wrs = team_roster[team_roster["position"] == "WR"]
-        tes = team_roster[team_roster["position"] == "TE"]
+        qbs = [p for p in roster_players if p["pos"] == "QB"]
+        rbs = [p for p in roster_players if p["pos"] in ["RB", "FB"]]
+        wrs = [p for p in roster_players if p["pos"] == "WR"]
+        tes = [p for p in roster_players if p["pos"] == "TE"]
         
         c_qb, c_rb, c_wr, c_te = st.columns(4)
         with c_qb:
             st.markdown("##### 🎯 Quarterbacks")
-            for _, p in qbs.head(3).iterrows():
-                st.write(f"#{int(p['jersey_number']) if pd.notna(p['jersey_number']) else '--'} {p['full_name']}")
+            for p in qbs[:4]:
+                st.write(f"#{p['jersey']} {p['name']}")
         with c_rb:
             st.markdown("##### 🏃 Running Backs")
-            for _, p in rbs.head(4).iterrows():
-                st.write(f"#{int(p['jersey_number']) if pd.notna(p['jersey_number']) else '--'} {p['full_name']}")
+            for p in rbs[:4]:
+                st.write(f"#{p['jersey']} {p['name']}")
         with c_wr:
             st.markdown("##### ⚡ Wide Receivers")
-            for _, p in wrs.head(5).iterrows():
-                st.write(f"#{int(p['jersey_number']) if pd.notna(p['jersey_number']) else '--'} {p['full_name']}")
+            for p in wrs[:5]:
+                st.write(f"#{p['jersey']} {p['name']}")
         with c_te:
             st.markdown("##### 🛡️ Tight Ends")
-            for _, p in tes.head(3).iterrows():
-                st.write(f"#{int(p['jersey_number']) if pd.notna(p['jersey_number']) else '--'} {p['full_name']}")
-        
-        # Build prop dropdowns using real names
-        all_skill = team_roster[team_roster["position"].isin(["WR", "TE", "RB"])]
-        skill_options = [
-            f"#{int(r['jersey_number']) if pd.notna(r['jersey_number']) else '--'} {r['full_name']} ({r['position']})" 
-            for _, r in all_skill.iterrows()
-        ]
-        
-        all_rush = team_roster[team_roster["position"].isin(["RB", "QB"])]
-        rush_options = [
-            f"#{int(r['jersey_number']) if pd.notna(r['jersey_number']) else '--'} {r['full_name']} ({r['position']})" 
-            for _, r in all_rush.iterrows()
-        ]
+            for p in tes[:4]:
+                st.write(f"#{p['jersey']} {p['name']}")
+
+        skill_options = [f"#{p['jersey']} {p['name']} ({p['pos']})" for p in (wrs + tes + rbs)]
+        rush_options = [f"#{p['jersey']} {p['name']} ({p['pos']})" for p in (rbs + qbs)]
 
     st.divider()
     st.subheader("🎯 Drive Micro-Prop Estimator")
@@ -286,8 +295,8 @@ with tab_team:
     with p_col1:
         st.markdown("#### 🏈 1+ Reception on This Drive")
         if skill_options:
-            chosen_target = st.selectbox("Select Player", skill_options, index=0)
-            t_share = st.slider("Estimated Target Share (%)", 5, 40, 22, 1, help="WR1s typically see 22-30% share; WR2/TEs see 14-20%.")
+            chosen_target = st.selectbox("Select Target", skill_options, index=0)
+            t_share = st.slider("Estimated Target Share (%)", 5, 40, 22, 1, help="Adjust for WR1 (22-30%), WR2 (15-20%), or TE/RB (10-18%)")
             
             exp_targets = est_plays * 0.58 * (t_share / 100.0)
             exp_catches = exp_targets * 0.68
@@ -300,7 +309,7 @@ with tab_team:
         st.markdown("#### 🏃 10+ Rushing Yards on This Drive")
         if rush_options:
             chosen_rusher = st.selectbox("Select Rusher", rush_options, index=0)
-            r_share = st.slider("Estimated Carry Share (%)", 5, 90, 65, 5, help="Lead backs command ~65% of volume.")
+            r_share = st.slider("Estimated Carry Share (%)", 5, 90, 65, 5, help="Lead backs command 60-75% of early down rush volume")
             
             exp_carries = est_plays * 0.42 * (r_share / 100.0)
             prob_10_rush = min(0.95, 1.0 - math.exp(-exp_carries * 0.42))
