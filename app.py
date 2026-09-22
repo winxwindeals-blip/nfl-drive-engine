@@ -6,7 +6,7 @@ import requests
 import math
 
 st.set_page_config(
-    page_title="NextDrive | Matchup Workstation",
+    page_title="NextDrive | A WIN•X•WIN LLC Company",
     page_icon="⚡",
     layout="wide"
 )
@@ -124,11 +124,11 @@ def fetch_live_espn_roster(team_id: str):
     return []
 
 # ---------------------------------------------------------
-# NEW LOGO & WORKSTATION HEADER
+# NEW LOGO & BRANDED SUBSIDIARY HEADER
 # ---------------------------------------------------------
 st.markdown("""
 <div style="display: flex; align-items: center; gap: 16px; padding: 10px 0 16px 0;">
-  <svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg width="62" height="62" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="60" height="60" rx="14" fill="#141820" stroke="#262D3D" stroke-width="2"/>
     <rect x="12" y="24" width="4" height="12" rx="2" fill="#3D4B63"/>
     <rect x="20" y="19" width="4" height="22" rx="2" fill="#6B7F9E"/>
@@ -141,10 +141,15 @@ st.markdown("""
     </defs>
   </svg>
   <div>
-    <h1 style="margin: 0; padding: 0; font-size: 2.1rem; font-weight: 900; letter-spacing: -0.5px; line-height: 1.1;">
-      NEXT<span style="color: #FF4B4B;">DRIVE</span>
-    </h1>
-    <p style="margin: 0; padding: 0; font-size: 0.8rem; font-weight: 700; color: #7C8BA1; letter-spacing: 1.5px; text-transform: uppercase;">
+    <div style="display: flex; align-items: baseline; gap: 10px;">
+      <h1 style="margin: 0; padding: 0; font-size: 2.1rem; font-weight: 900; letter-spacing: -0.5px; line-height: 1.1;">
+        NEXT<span style="color: #FF4B4B;">DRIVE</span>
+      </h1>
+      <span style="font-size: 0.72rem; font-weight: 800; color: #FF4B4B; letter-spacing: 1.4px; text-transform: uppercase; background: rgba(255, 75, 75, 0.12); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(255, 75, 75, 0.3);">
+        A WIN•X•WIN LLC COMPANY
+      </span>
+    </div>
+    <p style="margin: 4px 0 0 0; padding: 0; font-size: 0.78rem; font-weight: 700; color: #7C8BA1; letter-spacing: 1.3px; text-transform: uppercase;">
       Matchup Slate Analyzer & In-Game Possession Intelligence
     </p>
   </div>
