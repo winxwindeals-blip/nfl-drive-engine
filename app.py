@@ -26,7 +26,7 @@ def load_engine():
 model, feature_cols, classes = load_engine()
 
 # ---------------------------------------------------------
-# RELIABLE 32-TEAM ESPN DIRECTORY (Permanent Fallback)
+# RELIABLE 32-TEAM ESPN DIRECTORY
 # ---------------------------------------------------------
 ALL_32_TEAMS = {
     "Arizona Cardinals": {"id": "22", "abbrev": "ARI"},
@@ -76,26 +76,63 @@ def fetch_live_scoreboard():
 
 @st.cache_data(ttl=1800)
 def fetch_team_roster(team_id: str):
-    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
+    """Fetches real-time active offensive skill players via ESPN depth chart & roster endpoints"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    offense = []
+
+    # 1. Primary Attempt: ESPN Depth Chart API
+    dc_url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/depthcharts"
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+        r = requests.get(dc_url, headers=headers, timeout=5)
         if r.status_code == 200:
             data = r.json()
-            offense = []
+            items = data.get("depthchart", [])
+            target_slots = {"qb": "QB", "rb": "RB", "wr": "WR", "te": "TE", "fb": "FB"}
+            for slot in items:
+                pos_key = str(slot.get("name", "")).lower()
+                if pos_key in target_slots:
+                    std_pos = target_slots[pos_key]
+                    for ath_entry in slot.get("athletes", []):
+                        ath = ath_entry.get("athlete", ath_entry)
+                        name = ath.get("displayName") or ath.get("fullName")
+                        if name:
+                            offense.append({
+                                "name": name,
+                                "pos": std_pos,
+                                "jersey": str(ath.get("jersey", "--"))
+                            })
+            if offense:
+                return offense
+    except Exception:
+        pass
+
+    # 2. Secondary Attempt: ESPN Team Roster API
+    r_url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
+    try:
+        r = requests.get(r_url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
             for grp in data.get("athletes", []):
                 for ath in grp.get("items", []):
                     pos = ath.get("position", {}).get("abbreviation", "")
                     if pos in ["QB", "RB", "WR", "TE", "FB"]:
-                        offense.append({
-                            "name": ath.get("fullName", "Unknown"),
-                            "pos": pos,
-                            "jersey": ath.get("jersey", "--")
-                        })
-            return offense
+                        name = ath.get("fullName") or ath.get("displayName")
+                        if name:
+                            offense.append({
+                                "name": name,
+                                "pos": pos,
+                                "jersey": str(ath.get("jersey", "--"))
+                            })
+            if offense:
+                return offense
     except Exception:
         pass
+
     return []
 
+# ---------------------------------------------------------
+# APP HEADER
+# ---------------------------------------------------------
 st.title("⚡ NextDrive")
 st.caption("Live NFL Possession Outcome Engine & Real-Time Micro-Prop Analytics")
 
@@ -218,7 +255,7 @@ with tab_drive:
 with tab_team:
     st.subheader("Live Official Team Rosters & Personnel Micro-Props")
     
-    selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()))
+    selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()), index=26) # Defaults to Pittsburgh Steelers
     team_info = ALL_32_TEAMS[selected_team_name]
     
     with st.spinner(f"Fetching current roster for {selected_team_name}..."):
@@ -257,6 +294,7 @@ with tab_team:
     st.subheader("🎯 Drive Micro-Prop Estimator")
     st.caption(f"Estimated for upcoming drive starting at **{field_start}**")
 
+    # Plays expectancy model based on start territory
     est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
 
     p_col1, p_col2 = st.columns(2)
