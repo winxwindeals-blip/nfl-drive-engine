@@ -6,7 +6,7 @@ import requests
 import math
 
 st.set_page_config(
-    page_title="NextDrive | Live Possession & Micro-Prop Engine",
+    page_title="NextDrive | Matchup Workstation",
     page_icon="⚡",
     layout="wide"
 )
@@ -26,154 +26,160 @@ def load_engine():
 model, feature_cols, classes = load_engine()
 
 # ---------------------------------------------------------
-# RELIABLE 32-TEAM DIRECTORY (ESPN Team IDs & Abbreviations)
+# ESPN API DATA FETCHERS (WEEK-BY-WEEK MATCHUPS)
 # ---------------------------------------------------------
-ALL_32_TEAMS = {
-    "Arizona Cardinals": {"id": "22", "abbrev": "ARI"},
-    "Atlanta Falcons": {"id": "1", "abbrev": "ATL"},
-    "Baltimore Ravens": {"id": "33", "abbrev": "BAL"},
-    "Buffalo Bills": {"id": "2", "abbrev": "BUF"},
-    "Carolina Panthers": {"id": "29", "abbrev": "CAR"},
-    "Chicago Bears": {"id": "3", "abbrev": "CHI"},
-    "Cincinnati Bengals": {"id": "4", "abbrev": "CIN"},
-    "Cleveland Browns": {"id": "5", "abbrev": "CLE"},
-    "Dallas Cowboys": {"id": "6", "abbrev": "DAL"},
-    "Denver Broncos": {"id": "7", "abbrev": "DEN"},
-    "Detroit Lions": {"id": "8", "abbrev": "DET"},
-    "Green Bay Packers": {"id": "9", "abbrev": "GB"},
-    "Houston Texans": {"id": "34", "abbrev": "HOU"},
-    "Indianapolis Colts": {"id": "11", "abbrev": "IND"},
-    "Jacksonville Jaguars": {"id": "30", "abbrev": "JAX"},
-    "Kansas City Chiefs": {"id": "12", "abbrev": "KC"},
-    "Las Vegas Raiders": {"id": "13", "abbrev": "LV"},
-    "Los Angeles Chargers": {"id": "24", "abbrev": "LAC"},
-    "Los Angeles Rams": {"id": "14", "abbrev": "LAR"},
-    "Miami Dolphins": {"id": "15", "abbrev": "MIA"},
-    "Minnesota Vikings": {"id": "16", "abbrev": "MIN"},
-    "New England Patriots": {"id": "17", "abbrev": "NE"},
-    "New Orleans Saints": {"id": "18", "abbrev": "NO"},
-    "New York Giants": {"id": "19", "abbrev": "NYG"},
-    "New York Jets": {"id": "20", "abbrev": "NYJ"},
-    "Philadelphia Eagles": {"id": "21", "abbrev": "PHI"},
-    "Pittsburgh Steelers": {"id": "23", "abbrev": "PIT"},
-    "San Francisco 49ers": {"id": "25", "abbrev": "SF"},
-    "Seattle Seahawks": {"id": "26", "abbrev": "SEA"},
-    "Tampa Bay Buccaneers": {"id": "27", "abbrev": "TB"},
-    "Tennessee Titans": {"id": "10", "abbrev": "TEN"},
-    "Washington Commanders": {"id": "28", "abbrev": "WAS"}
-}
-
-ABBREV_TO_NAME = {v["abbrev"]: k for k, v in ALL_32_TEAMS.items()}
-
-@st.cache_data(ttl=15)
-def fetch_live_scoreboard():
-    url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+@st.cache_data(ttl=30)
+def fetch_week_schedule(week_num: int):
+    """Fetches full matchup slate for any regular season NFL week"""
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week={week_num}"
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
         if r.status_code == 200:
-            return r.json().get("events", [])
+            return r.json()
     except Exception:
         pass
-    return []
+    return {}
 
 @st.cache_data(ttl=1800)
 def fetch_live_espn_roster(team_id: str):
+    """Fetches active offensive skill players for a team"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/json"
     }
-    endpoints = [
-        f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster",
-        f"https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
-    ]
-    for url in endpoints:
-        try:
-            r = requests.get(url, headers=headers, timeout=5)
-            if r.status_code == 200:
-                data = r.json()
-                athletes_groups = data.get("athletes", [])
-                skill_players = []
-                target_positions = {"QB", "RB", "WR", "TE", "FB"}
-                for group in athletes_groups:
-                    for ath in group.get("items", []):
-                        pos = ath.get("position", {}).get("abbreviation", "").upper()
-                        if pos in target_positions:
-                            skill_players.append({
-                                "name": ath.get("fullName") or ath.get("displayName") or "Player",
-                                "pos": pos,
-                                "jersey": str(ath.get("jersey", "--"))
-                            })
-                if skill_players:
-                    return skill_players
-        except Exception:
-            continue
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            athletes_groups = data.get("athletes", [])
+            skill_players = []
+            target_positions = {"QB", "RB", "WR", "TE", "FB"}
+            for group in athletes_groups:
+                for ath in group.get("items", []):
+                    pos = ath.get("position", {}).get("abbreviation", "").upper()
+                    if pos in target_positions:
+                        skill_players.append({
+                            "name": ath.get("fullName") or ath.get("displayName") or "Player",
+                            "pos": pos,
+                            "jersey": str(ath.get("jersey", "--"))
+                        })
+            if skill_players:
+                return skill_players
+    except Exception:
+        pass
     return []
 
 # ---------------------------------------------------------
-# HEADER & DATA INGESTION
+# HEADER & WEEKLY SLATE SELECTOR
 # ---------------------------------------------------------
-st.title("⚡ NextDrive Workstation")
-st.caption("Real-Time Possession Engine with Automated Production & Situational Value Recommendations")
+st.title("⚡ NextDrive Matchup Workstation")
+st.caption("Weekly NFL Slate Analyzer with Live Possession & In-Drive Micro-Prop Projections")
 
-events = fetch_live_scoreboard()
-live_games = {}
+# Detect current season week from default scoreboard
+scoreboard_root = fetch_week_schedule(week_num=0)
+current_week = 3
+if scoreboard_root:
+    current_week = scoreboard_root.get("week", {}).get("number", 3)
+
+c_week, c_game = st.columns([1, 3])
+
+with c_week:
+    selected_week = st.selectbox("NFL Week", list(range(1, 19)), index=max(0, current_week - 1))
+
+# Load the selected week's full slate
+week_data = fetch_week_schedule(selected_week)
+events = week_data.get("events", [])
+
+matchups = {}
 for ev in events:
-    name = ev.get("name", "NFL Matchup")
-    state = ev.get("status", {}).get("type", {}).get("state", "pre")
-    clock = ev.get("status", {}).get("displayClock", "")
-    period = ev.get("status", {}).get("period", 0)
-    label = f"{name} (Q{period} {clock})" if state == "in" else f"{name} ({state.upper()})"
-    live_games[label] = ev
+    comp = ev.get("competitions", [{}])[0]
+    competitors = comp.get("competitors", [])
+    if len(competitors) >= 2:
+        home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+        away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+        status = ev.get("status", {})
+        state = status.get("type", {}).get("state", "pre")
+        clock = status.get("displayClock", "")
+        period = status.get("period", 0)
+        
+        h_abbr = home.get("team", {}).get("abbreviation", "HOME")
+        a_abbr = away.get("team", {}).get("abbreviation", "AWAY")
+        
+        status_label = f"🔴 Q{period} {clock}" if state == "in" else ("FINAL" if state == "post" else ev.get("status", {}).get("type", {}).get("shortDetail", "SCHEDULED"))
+        label = f"{a_abbr} @ {h_abbr} ({status_label})"
+        matchups[label] = {
+            "event": ev,
+            "home": home,
+            "away": away,
+            "status": status,
+            "situation": comp.get("situation", {})
+        }
 
-# Detect live game situations automatically
-if live_games:
-    selected_game = st.selectbox("Active Live Matchup", list(live_games.keys()))
-    ev = live_games[selected_game]
-    status = ev.get("status", {})
-    qtr = status.get("period", 1)
-    clock_str = status.get("displayClock", "15:00")
-    try:
-        m, s = map(int, clock_str.split(":"))
-        qtr_seconds = m * 60 + s
-    except Exception:
-        qtr_seconds = 900
-
-    half_seconds = qtr_seconds + 900 if qtr in [1, 3] else qtr_seconds
-    game_seconds = qtr_seconds + (4 - min(qtr, 4)) * 900
-
-    competitors = ev["competitions"][0]["competitors"]
-    home = next(c for c in competitors if c["homeAway"] == "home")
-    away = next(c for c in competitors if c["homeAway"] == "away")
-    situation = ev["competitions"][0].get("situation", {})
-    possession_id = situation.get("possession")
-    yardline_100 = situation.get("yardLine", 75)
-
-    home_score = int(home.get("score", 0))
-    away_score = int(away.get("score", 0))
-
-    if possession_id == home["id"]:
-        score_diff = home_score - away_score
-        poss_team_abbr = home["team"]["abbreviation"]
+with c_game:
+    if matchups:
+        selected_matchup_label = st.selectbox("Select Matchup", list(matchups.keys()))
+        active_match = matchups[selected_matchup_label]
     else:
-        score_diff = away_score - home_score
-        poss_team_abbr = away.get("team", {}).get("abbreviation", "OFF")
+        st.warning(f"No schedule events found for Week {selected_week}.")
+        st.stop()
 
-    field_start = f"Own {100 - yardline_100}" if yardline_100 > 50 else f"Opp {yardline_100}"
-    st.info(f"🏈 **Live Game Ingestion:** {selected_game} | Possession: **{poss_team_abbr}** | Ball on: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
+# ---------------------------------------------------------
+# MATCHUP TELEMETRY & POSSESSION SELECTION
+# ---------------------------------------------------------
+home_team = active_match["home"]["team"]
+away_team = active_match["away"]["team"]
+home_score = int(active_match["home"].get("score", 0))
+away_score = int(active_match["away"].get("score", 0))
 
+state = active_match["status"].get("type", {}).get("state", "pre")
+sit = active_match["situation"]
+
+# Determine possession
+auto_poss_id = sit.get("possession")
+default_poss_idx = 1 if auto_poss_id == home_team["id"] else 0
+
+st.write("")
+col_poss, col_info = st.columns([2, 4])
+
+with col_poss:
+    poss_choice = st.radio(
+        "Offense on Field (Has Ball)",
+        [f"{away_team['displayName']} ({away_team['abbreviation']})", 
+         f"{home_team['displayName']} ({home_team['abbreviation']})"],
+        index=default_poss_idx,
+        horizontal=True
+    )
+
+is_home_poss = (poss_choice.startswith(home_team["displayName"]))
+off_team = home_team if is_home_poss else away_team
+def_team = away_team if is_home_poss else home_team
+score_diff = (home_score - away_score) if is_home_poss else (away_score - home_score)
+
+# Live clock and ball spot ingestion
+if state == "in":
+    qtr = active_match["status"].get("period", 1)
+    clock_str = active_match["status"].get("displayClock", "15:00")
+    yardline_100 = sit.get("yardLine", 75)
 else:
-    st.warning("📡 **Scoreboard Standby:** No NFL games active right now. Operating on standard baseline defaults (touchback territory, tied margin).")
     qtr = 2
-    clock_str = "8:00"
-    qtr_seconds = 480
-    half_seconds = 480
-    game_seconds = 1380
-    yardline_100 = 75
-    score_diff = 0
-    poss_team_abbr = "KC"
-    field_start = "Own 25"
+    clock_str = "8:30"
+    yardline_100 = 75  # Standard touchback Own 25
 
-# Run Drive Outcome Model
+try:
+    m, s = map(int, clock_str.split(":"))
+    qtr_seconds = m * 60 + s
+except Exception:
+    qtr_seconds = 510
+
+half_seconds = qtr_seconds + 900 if qtr in [1, 3] else qtr_seconds
+game_seconds = qtr_seconds + (4 - min(qtr, 4)) * 900
+field_start = f"Own {100 - yardline_100}" if yardline_100 > 50 else f"Opp {yardline_100}"
+
+with col_info:
+    st.info(f"🏈 **Drive Situation:** **{off_team['abbreviation']}** Offense vs **{def_team['abbreviation']}** Defense | Line of Scrimmage: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
+
+# Run Drive Model
 input_df = pd.DataFrame([{
     "yardline_100": yardline_100,
     "half_seconds_remaining": half_seconds,
@@ -186,11 +192,9 @@ input_df = pd.DataFrame([{
 
 probs = model.predict_proba(input_df)[0]
 results = sorted(zip(classes, probs), key=lambda x: x[1], reverse=True)
-
-# Expected plays on this possession based on field territory
 est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
 
-# Dynamic Pass/Run situational lean
+# Game script run/pass lean
 pass_rate = 0.58
 if score_diff <= -8 and qtr >= 3:
     pass_rate = 0.72
@@ -199,44 +203,24 @@ elif score_diff >= 8 and qtr >= 3:
 run_rate = 1.0 - pass_rate
 
 # ---------------------------------------------------------
-# AUTO-SYNC TEAM ROSTER
+# FETCH OFFENSIVE ROSTER FOR THIS MATCHUP
 # ---------------------------------------------------------
-default_team_name = ABBREV_TO_NAME.get(poss_team_abbr, "Kansas City Chiefs")
-all_team_list = list(ALL_32_TEAMS.keys())
-default_idx = all_team_list.index(default_team_name) if default_team_name in all_team_list else 15
-
-c_sel, c_ref = st.columns([5, 1])
-with c_sel:
-    selected_team_name = st.selectbox("Offense on Field", all_team_list, index=default_idx)
-with c_ref:
-    st.write("")
-    st.write("")
-    if st.button("🔄 Reload"):
-        st.cache_data.clear()
-        st.rerun()
-
-team_data = ALL_32_TEAMS[selected_team_name]
-roster_players = fetch_live_espn_roster(team_data["id"])
-
+roster_players = fetch_live_espn_roster(off_team["id"])
 wrs = [p for p in roster_players if p["pos"] == "WR"] if roster_players else []
 tes = [p for p in roster_players if p["pos"] == "TE"] if roster_players else []
 rbs = [p for p in roster_players if p["pos"] in ["RB", "FB"]] if roster_players else []
 qbs = [p for p in roster_players if p["pos"] == "QB"] if roster_players else []
 
 # ---------------------------------------------------------
-# ⭐ SUGGESTED VALUE SPOTS CARD (NEW SECTION)
+# SUGGESTED VALUE SPOTLIGHTS FOR THIS MATCHUP
 # ---------------------------------------------------------
-st.markdown("### 🔥 NextDrive Suggested Value Spotlights")
+st.markdown(f"### 🔥 Matchup Value Spotlights ({off_team['abbreviation']} vs {def_team['abbreviation']})")
 
 if roster_players:
     top_wr = wrs[0] if wrs else None
     top_rb = rbs[0] if rbs else None
 
-    # Calculate live probabilities for top options
-    rec_prob_1 = 0.0
-    rec_prob_2 = 0.0
-    rush_prob_5 = 0.0
-    rush_prob_10 = 0.0
+    rec_prob_1, rec_prob_2, rush_prob_5, rush_prob_10 = 0.0, 0.0, 0.0, 0.0
 
     if top_wr:
         exp_tg = est_plays * pass_rate * 0.25
@@ -250,40 +234,39 @@ if roster_players:
         rush_prob_10 = min(0.95, 1.0 - math.exp(-exp_car * 0.42))
 
     s1, s2, s3 = st.columns(3)
-    
     with s1:
-        st.success("🎯 **Top Volume Floor (Safest Hit)**")
+        st.success("🎯 **Top Volume Floor (High Hit Rate)**")
         if rush_prob_5 >= rec_prob_1 and top_rb:
             st.markdown(f"**#{top_rb['jersey']} {top_rb['name']} (RB1)**")
             st.write(f"• **5+ Rushing Yards:** **{rush_prob_5 * 100:.1f}%** (`{prob_to_american(rush_prob_5)}`)")
-            st.caption(f"Lead carry share ({exp_car:.1f} exp carries) gives highest statistical floor.")
+            st.caption(f"Projected ~{exp_car:.1f} carries from {field_start}.")
         elif top_wr:
             st.markdown(f"**#{top_wr['jersey']} {top_wr['name']} (WR1)**")
             st.write(f"• **1+ Reception:** **{rec_prob_1 * 100:.1f}%** (`{prob_to_american(rec_prob_1)}`)")
-            st.caption(f"Primary target share (~25%) projected for {exp_tg:.1f} targets on this drive.")
+            st.caption(f"Primary target funnel (~25% share against {def_team['abbreviation']}).")
 
     with s2:
         st.info("🚀 **Top Plus-Money Value (Ceiling)**")
         if top_wr:
             st.markdown(f"**#{top_wr['jersey']} {top_wr['name']} (WR1)**")
             st.write(f"• **2+ Receptions:** **{rec_prob_2 * 100:.1f}%** (`{prob_to_american(rec_prob_2)}`)")
-            st.caption(f"Strong plus-money conversion rate if drive extends past 5 plays.")
+            st.caption(f"Strong plus-money conversion on drives reaching 5+ plays.")
         elif top_rb:
             st.markdown(f"**#{top_rb['jersey']} {top_rb['name']} (RB1)**")
             st.write(f"• **10+ Rushing Yards:** **{rush_prob_10 * 100:.1f}%** (`{prob_to_american(rush_prob_10)}`)")
-            st.caption("Explosive run probability given starting territory.")
+            st.caption(f"Explosive chunk yardage benchmark vs {def_team['abbreviation']}.")
 
     with s3:
-        st.warning("📋 **Situational Context & Lean**")
+        st.warning("📋 **Matchup Game Script**")
         if score_diff <= -8 and qtr >= 3:
-            st.write("• **Trailing Game Script:** Pass rate elevated to **~72%**; targets funnel heavily toward WRs.")
+            st.write(f"• **Trailing {score_diff:+d}:** Pass heavy script (~72% pass lean).")
         elif score_diff >= 8 and qtr >= 3:
-            st.write("• **Leading Game Script:** Run rate elevated to **~58%**; clock burn heavily favors RB1 touches.")
+            st.write(f"• **Protecting Lead {score_diff:+d}:** Run heavy script (~58% rush lean).")
         else:
-            st.write(f"• **Neutral Game Script:** Balanced split ({pass_rate*100:.0f}% Pass / {run_rate*100:.0f}% Run) from **{field_start}**.")
-        st.caption(f"Drive expectancy: ~{est_plays} scrimmage plays.")
+            st.write(f"• **Neutral Script:** Standard balanced playcalling.")
+        st.caption(f"Drive volume: ~{est_plays} plays.")
 else:
-    st.info("Roster data syncing...")
+    st.info("Loading active personnel...")
 
 st.divider()
 
@@ -294,14 +277,14 @@ col_drive, col_divider, col_prop = st.columns([10, 1, 11])
 
 # === LEFT PANEL: DRIVE OUTCOME ENGINE ===
 with col_drive:
-    st.subheader("🏈 Next Drive Probabilities")
+    st.subheader(f"🏈 {off_team['abbreviation']} Drive Probabilities")
     
     m1, m2, m3 = st.columns(3)
-    m1.metric("Live Clock", f"Q{qtr} {clock_str}")
-    m2.metric("Live Ball Spot", field_start)
-    m3.metric("Live Margin", f"{score_diff:+d} pts")
+    m1.metric("Game Clock", f"Q{qtr} {clock_str}")
+    m2.metric("Ball Spot", field_start)
+    m3.metric("Margin", f"{score_diff:+d} pts")
     
-    st.caption(f"Calculated drive volume: **~{est_plays} plays** from scrimmage.")
+    st.caption(f"Expected drive volume: **~{est_plays} plays** from scrimmage.")
     st.write("")
 
     for outcome, p in results:
@@ -315,7 +298,7 @@ with col_drive:
     st.markdown("##### 💡 TV Timeout +EV & Stake Sizer")
     s_mkt, s_line, s_bank = st.columns(3)
     bet_choice = s_mkt.selectbox("Market Pick", [r[0].replace("_", " ") for r in results])
-    offered_line = s_line.number_input("Sportsbook Odds (+320)", value=320, step=10)
+    offered_line = s_line.number_input("Book Line (+320)", value=320, step=10)
     bankroll = s_bank.number_input("Bankroll ($)", value=1000, step=100)
 
     p_sel = dict([(r[0].replace("_", " "), r[1]) for r in results])[bet_choice]
@@ -337,7 +320,7 @@ with col_divider:
 
 # === RIGHT PANEL: ALL PLAYER PROPS ===
 with col_prop:
-    st.subheader("🎯 All Player Micro-Props")
+    st.subheader(f"🎯 {off_team['abbreviation']} Player Micro-Props")
 
     if not roster_players:
         st.warning("Connecting to active roster...")
