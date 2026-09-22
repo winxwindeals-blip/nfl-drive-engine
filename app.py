@@ -26,42 +26,56 @@ def load_engine():
 model, feature_cols, classes = load_engine()
 
 # ---------------------------------------------------------
-# LIVE ESPN DATA FETCHERS
+# RELIABLE 32-TEAM ESPN DIRECTORY (Permanent Fallback)
 # ---------------------------------------------------------
-@st.cache_data(ttl=30)
+ALL_32_TEAMS = {
+    "Arizona Cardinals": {"id": "22", "abbrev": "ARI"},
+    "Atlanta Falcons": {"id": "1", "abbrev": "ATL"},
+    "Baltimore Ravens": {"id": "33", "abbrev": "BAL"},
+    "Buffalo Bills": {"id": "2", "abbrev": "BUF"},
+    "Carolina Panthers": {"id": "29", "abbrev": "CAR"},
+    "Chicago Bears": {"id": "3", "abbrev": "CHI"},
+    "Cincinnati Bengals": {"id": "4", "abbrev": "CIN"},
+    "Cleveland Browns": {"id": "5", "abbrev": "CLE"},
+    "Dallas Cowboys": {"id": "6", "abbrev": "DAL"},
+    "Denver Broncos": {"id": "7", "abbrev": "DEN"},
+    "Detroit Lions": {"id": "8", "abbrev": "DET"},
+    "Green Bay Packers": {"id": "9", "abbrev": "GB"},
+    "Houston Texans": {"id": "34", "abbrev": "HOU"},
+    "Indianapolis Colts": {"id": "11", "abbrev": "IND"},
+    "Jacksonville Jaguars": {"id": "30", "abbrev": "JAX"},
+    "Kansas City Chiefs": {"id": "12", "abbrev": "KC"},
+    "Las Vegas Raiders": {"id": "13", "abbrev": "LV"},
+    "Los Angeles Chargers": {"id": "24", "abbrev": "LAC"},
+    "Los Angeles Rams": {"id": "14", "abbrev": "LAR"},
+    "Miami Dolphins": {"id": "15", "abbrev": "MIA"},
+    "Minnesota Vikings": {"id": "16", "abbrev": "MIN"},
+    "New England Patriots": {"id": "17", "abbrev": "NE"},
+    "New Orleans Saints": {"id": "18", "abbrev": "NO"},
+    "New York Giants": {"id": "19", "abbrev": "NYG"},
+    "New York Jets": {"id": "20", "abbrev": "NYJ"},
+    "Philadelphia Eagles": {"id": "21", "abbrev": "PHI"},
+    "Pittsburgh Steelers": {"id": "23", "abbrev": "PIT"},
+    "San Francisco 49ers": {"id": "25", "abbrev": "SF"},
+    "Seattle Seahawks": {"id": "26", "abbrev": "SEA"},
+    "Tampa Bay Buccaneers": {"id": "27", "abbrev": "TB"},
+    "Tennessee Titans": {"id": "10", "abbrev": "TEN"},
+    "Washington Commanders": {"id": "28", "abbrev": "WAS"}
+}
+
+@st.cache_data(ttl=20)
 def fetch_live_scoreboard():
     url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         if r.status_code == 200:
             return r.json().get("events", [])
     except Exception:
         pass
     return []
 
-@st.cache_data(ttl=3600)
-def fetch_all_nfl_teams():
-    url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams"
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
-        if r.status_code == 200:
-            teams_raw = r.json()["sports"][0]["leagues"][0]["teams"]
-            teams = {}
-            for item in teams_raw:
-                t = item["team"]
-                teams[t["displayName"]] = {
-                    "id": t["id"],
-                    "abbrev": t["abbreviation"],
-                    "short": t["shortDisplayName"]
-                }
-            return dict(sorted(teams.items()))
-    except Exception:
-        pass
-    return {}
-
 @st.cache_data(ttl=1800)
 def fetch_team_roster(team_id: str):
-    """Fetches real-time active offensive skill players from ESPN"""
     url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
     try:
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
@@ -82,16 +96,13 @@ def fetch_team_roster(team_id: str):
         pass
     return []
 
-# ---------------------------------------------------------
-# APP HEADER
-# ---------------------------------------------------------
 st.title("⚡ NextDrive")
 st.caption("Live NFL Possession Outcome Engine & Real-Time Micro-Prop Analytics")
 
 tab_drive, tab_team = st.tabs(["🏈 Live Next Drive Engine", "📊 Live Team Rosters & Micro-Props"])
 
 # ---------------------------------------------------------
-# TAB 1: LIVE DRIVE ENGINE
+# TAB 1: LIVE DRIVE OUTCOME ENGINE
 # ---------------------------------------------------------
 with tab_drive:
     events = fetch_live_scoreboard()
@@ -206,78 +217,72 @@ with tab_drive:
 # ---------------------------------------------------------
 with tab_team:
     st.subheader("Live Official Team Rosters & Personnel Micro-Props")
-    st.caption("Pulls real-time rosters directly from ESPN's active directory.")
-
-    all_teams = fetch_all_nfl_teams()
-    if not all_teams:
-        st.error("Unable to load team list from ESPN. Check internet connection.")
-    else:
-        selected_team_name = st.selectbox("Select NFL Franchise", list(all_teams.keys()))
-        team_info = all_teams[selected_team_name]
-        
-        # Fetch live roster for this team
+    
+    selected_team_name = st.selectbox("Select NFL Franchise", list(ALL_32_TEAMS.keys()))
+    team_info = ALL_32_TEAMS[selected_team_name]
+    
+    with st.spinner(f"Fetching current roster for {selected_team_name}..."):
         roster = fetch_team_roster(team_info["id"])
+    
+    if not roster:
+        st.warning(f"Roster details temporarily syncing from ESPN for {selected_team_name}. You can still use the prop calculator below.")
+        skill_options = ["Primary WR1", "Slot WR / WR2", "Pass-Catching TE", "Starting RB"]
+    else:
+        qbs = [p for p in roster if p["pos"] == "QB"]
+        rbs = [p for p in roster if p["pos"] in ["RB", "FB"]]
+        wrs = [p for p in roster if p["pos"] == "WR"]
+        tes = [p for p in roster if p["pos"] == "TE"]
         
-        if not roster:
-            st.warning(f"Roster data currently syncing for {selected_team_name}...")
-        else:
-            qbs = [p for p in roster if p["pos"] == "QB"]
-            rbs = [p for p in roster if p["pos"] in ["RB", "FB"]]
-            wrs = [p for p in roster if p["pos"] == "WR"]
-            tes = [p for p in roster if p["pos"] == "TE"]
+        c_qb, c_rb, c_wr, c_te = st.columns(4)
+        with c_qb:
+            st.markdown("##### 🎯 Quarterbacks")
+            for p in qbs[:3]:
+                st.write(f"#{p['jersey']} {p['name']}")
+        with c_rb:
+            st.markdown("##### 🏃 Running Backs")
+            for p in rbs[:4]:
+                st.write(f"#{p['jersey']} {p['name']}")
+        with c_wr:
+            st.markdown("##### ⚡ Wide Receivers")
+            for p in wrs[:5]:
+                st.write(f"#{p['jersey']} {p['name']}")
+        with c_te:
+            st.markdown("##### 🛡️ Tight Ends")
+            for p in tes[:3]:
+                st.write(f"#{p['jersey']} {p['name']}")
+        
+        skill_options = [f"#{p['jersey']} {p['name']} ({p['pos']})" for p in (wrs + tes + rbs)]
+
+    st.divider()
+    st.subheader("🎯 Drive Micro-Prop Estimator")
+    st.caption(f"Estimated for upcoming drive starting at **{field_start}**")
+
+    est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
+
+    p_col1, p_col2 = st.columns(2)
+    
+    with p_col1:
+        st.markdown("#### 🏈 1+ Reception on This Drive")
+        if skill_options:
+            chosen_target = st.selectbox("Select Player", skill_options, index=0)
+            t_share = st.slider("Estimated Target Share (%)", 5, 40, 22, 1, help="Adjust based on whether player is WR1 (20-28%), WR2 (15-20%), or TE/RB (10-18%)")
             
-            c_qb, c_rb, c_wr, c_te = st.columns(4)
-            with c_qb:
-                st.markdown("##### 🎯 Quarterbacks")
-                for p in qbs[:3]:
-                    st.write(f"#{p['jersey']} {p['name']}")
-            with c_rb:
-                st.markdown("##### 🏃 Running Backs")
-                for p in rbs[:4]:
-                    st.write(f"#{p['jersey']} {p['name']}")
-            with c_wr:
-                st.markdown("##### ⚡ Wide Receivers")
-                for p in wrs[:5]:
-                    st.write(f"#{p['jersey']} {p['name']}")
-            with c_te:
-                st.markdown("##### 🛡️ Tight Ends")
-                for p in tes[:3]:
-                    st.write(f"#{p['jersey']} {p['name']}")
-
-            st.divider()
-            st.subheader("🎯 Drive Micro-Prop Estimator")
-            st.caption(f"Estimated for upcoming drive starting at **{field_start}**")
-
-            # Plays expectancy model based on start territory
-            est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
-
-            p_col1, p_col2 = st.columns(2)
+            exp_targets = est_plays * 0.58 * (t_share / 100.0)
+            exp_catches = exp_targets * 0.68
+            prob_catch = 1.0 - math.exp(-exp_catches)
             
-            # Pass Target micro-prop
-            with p_col1:
-                st.markdown("#### 🏈 1+ Reception on This Drive")
-                pass_catchers = [f"#{p['jersey']} {p['name']} ({p['pos']})" for p in (wrs + tes + rbs)]
-                if pass_catchers:
-                    chosen_target = st.selectbox("Select Player", pass_catchers, index=0)
-                    t_share = st.slider("Estimated Target Share (%)", 5, 40, 22, 1, help="Adjust based on whether player is WR1 (20-28%), WR2 (15-20%), or TE/RB (10-18%)")
-                    
-                    exp_targets = est_plays * 0.58 * (t_share / 100.0)
-                    exp_catches = exp_targets * 0.68
-                    prob_catch = 1.0 - math.exp(-exp_catches)
-                    
-                    st.metric("1+ Catch Probability", f"{prob_catch * 100:.1f}%", f"Fair: {prob_to_american(prob_catch)}")
-                    st.caption(f"Expected plays: ~{est_plays} | Estimated targets this drive: {exp_targets:.2f}")
+            st.metric("1+ Catch Probability", f"{prob_catch * 100:.1f}%", f"Fair: {prob_to_american(prob_catch)}")
+            st.caption(f"Expected plays: ~{est_plays} | Estimated targets this drive: {exp_targets:.2f}")
 
-            # Rusher micro-prop
-            with p_col2:
-                st.markdown("#### 🏃 10+ Rushing Yards on This Drive")
-                rushers = [f"#{p['jersey']} {p['name']} ({p['pos']})" for p in (rbs + qbs)]
-                if rushers:
-                    chosen_rusher = st.selectbox("Select Rusher", rushers, index=0)
-                    r_share = st.slider("Estimated Carry Share (%)", 5, 90, 65, 5, help="Lead backs typically command 60-75% of early down rush volume")
-                    
-                    exp_carries = est_plays * 0.42 * (r_share / 100.0)
-                    prob_10_rush = min(0.95, 1.0 - math.exp(-exp_carries * 0.42))
-                    
-                    st.metric("10+ Rush Yds Probability", f"{prob_10_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_10_rush)}")
-                    st.caption(f"Expected plays: ~{est_plays} | Estimated carries this drive: {exp_carries:.2f}")
+    with p_col2:
+        st.markdown("#### 🏃 10+ Rushing Yards on This Drive")
+        rush_options = [f"#{p['jersey']} {p['name']} ({p['pos']})" for p in (rbs + qbs)] if roster else ["Lead RB", "RB2 / Change of Pace", "Mobile QB"]
+        if rush_options:
+            chosen_rusher = st.selectbox("Select Rusher", rush_options, index=0)
+            r_share = st.slider("Estimated Carry Share (%)", 5, 90, 65, 5, help="Lead backs typically command 60-75% of early down rush volume")
+            
+            exp_carries = est_plays * 0.42 * (r_share / 100.0)
+            prob_10_rush = min(0.95, 1.0 - math.exp(-exp_carries * 0.42))
+            
+            st.metric("10+ Rush Yds Probability", f"{prob_10_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_10_rush)}")
+            st.caption(f"Expected plays: ~{est_plays} | Estimated carries this drive: {exp_carries:.2f}")
