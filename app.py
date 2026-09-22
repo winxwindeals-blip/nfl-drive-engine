@@ -78,7 +78,6 @@ def fetch_live_scoreboard():
 
 @st.cache_data(ttl=1800)
 def fetch_live_espn_roster(team_id: str):
-    """Fetches real-time active skill roster from ESPN"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/json"
@@ -111,10 +110,10 @@ def fetch_live_espn_roster(team_id: str):
     return []
 
 # ---------------------------------------------------------
-# HEADER
+# HEADER & DATA INGESTION
 # ---------------------------------------------------------
 st.title("⚡ NextDrive Workstation")
-st.caption("Integrated Possession Probabilities & Live Player Micro-Props for In-Game TV Breaks")
+st.caption("Real-Time NFL Possession Probabilities & Live Player Micro-Props Powered by ESPN Live Data")
 
 events = fetch_live_scoreboard()
 live_games = {}
@@ -126,16 +125,9 @@ for ev in events:
     label = f"{name} (Q{period} {clock})" if state == "in" else f"{name} ({state.upper()})"
     live_games[label] = ev
 
-# ---------------------------------------------------------
-# SIDEBAR SETUP & SITUATION INPUTS
-# ---------------------------------------------------------
-st.sidebar.title("⚡ NextDrive Control")
-mode = st.sidebar.radio("Data Source", ["Live Feed", "Manual Controls"])
-
-poss_team_abbr = "HOU"
-
-if mode == "Live Feed" and live_games:
-    selected_game = st.sidebar.selectbox("Active Matchup", list(live_games.keys()))
+# Detect live game situations automatically
+if live_games:
+    selected_game = st.selectbox("Active Live Matchup", list(live_games.keys()))
     ev = live_games[selected_game]
     status = ev.get("status", {})
     qtr = status.get("period", 1)
@@ -167,21 +159,19 @@ if mode == "Live Feed" and live_games:
         poss_team_abbr = away.get("team", {}).get("abbreviation", "OFF")
 
     field_start = f"Own {100 - yardline_100}" if yardline_100 > 50 else f"Opp {yardline_100}"
-    st.info(f"🏈 **Live Game Ingestion:** {selected_game} | Poss: **{poss_team_abbr}** | Ball on **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
-else:
-    if mode == "Live Feed" and not live_games:
-        st.sidebar.caption("No live NFL game currently playing. Switched to manual controls.")
-    st.sidebar.subheader("Manual Situation")
-    qtr = st.sidebar.radio("Quarter", [1, 2, 3, 4], index=1, horizontal=True)
-    time_min = st.sidebar.slider("Minutes Remaining", 0, 15, 8)
-    time_sec = st.sidebar.slider("Seconds Remaining", 0, 59, 30)
-    qtr_seconds = time_min * 60 + time_sec
-    half_seconds = qtr_seconds + 900 if qtr in [1, 3] else qtr_seconds
-    game_seconds = qtr_seconds + (4 - qtr) * 900
+    st.info(f"🏈 **Live Situation Ingested:** {selected_game} | Possession: **{poss_team_abbr}** | Ball on: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
 
-    yardline_100 = st.sidebar.slider("Yards to Opponent End Zone", 1, 99, 75, help="75 = Own 25 (Standard Touchback)")
-    score_diff = st.sidebar.slider("Score Margin (Offense)", -35, 35, 0)
-    field_start = f"Own {100 - yardline_100}" if yardline_100 > 50 else f"Opp {yardline_100}"
+else:
+    st.warning("📡 **Scoreboard Standby:** No NFL games currently kicking off. Operating on standard game defaults (touchback territory, tied margin).")
+    qtr = 2
+    clock_str = "8:00"
+    qtr_seconds = 480
+    half_seconds = 480
+    game_seconds = 1380
+    yardline_100 = 75
+    score_diff = 0
+    poss_team_abbr = "KC"
+    field_start = "Own 25"
 
 # Run Drive Outcome Model
 input_df = pd.DataFrame([{
@@ -210,11 +200,11 @@ with col_drive:
     st.subheader("🏈 Next Drive Probabilities")
     
     m1, m2, m3 = st.columns(3)
-    m1.metric("Clock", f"Q{qtr} {qtr_seconds//60:02d}:{qtr_seconds%60:02d}")
-    m2.metric("Start Line", field_start)
-    m3.metric("Margin", f"{score_diff:+d} pts")
+    m1.metric("Live Clock", f"Q{qtr} {clock_str}")
+    m2.metric("Live Ball Spot", field_start)
+    m3.metric("Live Margin", f"{score_diff:+d} pts")
     
-    st.caption(f"Estimated plays from scrimmage: **~{est_plays} plays**")
+    st.caption(f"Calculated drive volume: **~{est_plays} plays** from scrimmage.")
     st.write("")
 
     for outcome, p in results:
@@ -228,7 +218,7 @@ with col_drive:
     st.markdown("##### 💡 TV Timeout +EV & Stake Sizer")
     s_mkt, s_line, s_bank = st.columns(3)
     bet_choice = s_mkt.selectbox("Market Pick", [r[0].replace("_", " ") for r in results])
-    offered_line = s_line.number_input("Book Line (+350)", value=320, step=10)
+    offered_line = s_line.number_input("Sportsbook Odds (+320)", value=320, step=10)
     bankroll = s_bank.number_input("Bankroll ($)", value=1000, step=100)
 
     p_sel = dict([(r[0].replace("_", " "), r[1]) for r in results])[bet_choice]
@@ -252,10 +242,10 @@ with col_divider:
 with col_prop:
     st.subheader("🎯 Player Drive Micro-Props")
     
-    # Auto-select the team with possession if recognized, otherwise pick Houston
-    default_team_name = ABBREV_TO_NAME.get(poss_team_abbr, "Houston Texans")
+    # Auto-sync offense on field to the live possession team
+    default_team_name = ABBREV_TO_NAME.get(poss_team_abbr, "Kansas City Chiefs")
     all_team_list = list(ALL_32_TEAMS.keys())
-    default_idx = all_team_list.index(default_team_name) if default_team_name in all_team_list else 12
+    default_idx = all_team_list.index(default_team_name) if default_team_name in all_team_list else 15
 
     row_team, row_refresh = st.columns([4, 1])
     with row_team:
@@ -263,17 +253,17 @@ with col_prop:
     with row_refresh:
         st.write("")
         st.write("")
-        if st.button("🔄 Reload"):
+        if st.button("🔄 Refresh"):
             st.cache_data.clear()
             st.rerun()
 
     team_data = ALL_32_TEAMS[selected_team_name]
     
-    with st.spinner(f"Loading {selected_team_name} active personnel..."):
+    with st.spinner(f"Loading {selected_team_name} active roster..."):
         roster_players = fetch_live_espn_roster(team_data["id"])
         
     if not roster_players:
-        st.warning("Roster currently syncing from ESPN. Click 'Reload' above.")
+        st.warning("Connecting to active roster...")
     else:
         wrs = [p for p in roster_players if p["pos"] == "WR"]
         tes = [p for p in roster_players if p["pos"] == "TE"]
@@ -300,7 +290,7 @@ with col_prop:
             exp_targets = est_plays * 0.58 * target_share
             exp_catches = exp_targets * 0.68
             
-            st.caption(f"Assigned Target Share: **{target_share * 100:.0f}%** (~{exp_targets:.2f} expected targets this drive)")
+            st.caption(f"Live Ingested Opportunity: **{target_share * 100:.0f}%** Target Share (~{exp_targets:.2f} targets)")
 
             r_col1, r_col2 = st.columns(2)
             prob_1_catch = 1.0 - math.exp(-exp_catches)
@@ -322,7 +312,7 @@ with col_prop:
             carry_share = rush_options[chosen_rusher]
             
             exp_carries = est_plays * 0.42 * carry_share
-            st.caption(f"Assigned Carry Share: **{carry_share * 100:.0f}%** (~{exp_carries:.2f} expected carries this drive)")
+            st.caption(f"Live Ingested Opportunity: **{carry_share * 100:.0f}%** Carry Share (~{exp_carries:.2f} carries)")
 
             ru_col1, ru_col2 = st.columns(2)
             prob_5_rush = min(0.98, 1.0 - math.exp(-exp_carries * 0.72))
