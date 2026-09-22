@@ -76,7 +76,7 @@ WEEKLY_SCHEDULE_BACKUP = {
     8: [("MIN", "LAR"), ("BAL", "CLE"), ("TEN", "DET"), ("IND", "HOU"), ("GB", "JAX"), ("ARI", "MIA"), ("NYJ", "NE"), ("ATL", "TB"), ("CHI", "WAS"), ("NO", "LAC"), ("BUF", "SEA"), ("PHI", "CIN"), ("CAR", "DEN"), ("KC", "LV"), ("DAL", "SF"), ("NYG", "PIT")]
 }
 
-@st.cache_data(ttl=20)
+@st.cache_data(ttl=15)
 def fetch_week_schedule(week_num: int):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=2024&seasontype=2&week={week_num}"
@@ -124,11 +124,11 @@ def fetch_live_espn_roster(team_id: str):
     return []
 
 # ---------------------------------------------------------
-# NEW LOGO & BRANDED SUBSIDIARY HEADER
+# LOGO & BRANDED SUBSIDIARY HEADER
 # ---------------------------------------------------------
 st.markdown("""
-<div style="display: flex; align-items: center; gap: 16px; padding: 10px 0 16px 0;">
-  <svg width="62" height="62" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+<div style="display: flex; align-items: center; gap: 16px; padding: 6px 0 14px 0;">
+  <svg width="58" height="58" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect width="60" height="60" rx="14" fill="#141820" stroke="#262D3D" stroke-width="2"/>
     <rect x="12" y="24" width="4" height="12" rx="2" fill="#3D4B63"/>
     <rect x="20" y="19" width="4" height="22" rx="2" fill="#6B7F9E"/>
@@ -149,15 +149,15 @@ st.markdown("""
         A WIN•X•WIN LLC COMPANY
       </span>
     </div>
-    <p style="margin: 4px 0 0 0; padding: 0; font-size: 0.78rem; font-weight: 700; color: #7C8BA1; letter-spacing: 1.3px; text-transform: uppercase;">
-      Matchup Slate Analyzer & In-Game Possession Intelligence
+    <p style="margin: 3px 0 0 0; padding: 0; font-size: 0.78rem; font-weight: 700; color: #7C8BA1; letter-spacing: 1.3px; text-transform: uppercase;">
+      Real-Time Live Scoreboard & Advanced Micro-Prop Analytics
     </p>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# SCHEDULE & MATCHUP SELECTION
+# SCHEDULE & MATCHUP INGESTION
 # ---------------------------------------------------------
 c_week, c_game = st.columns([1, 3])
 
@@ -184,6 +184,8 @@ if events:
             
             status_label = f"🔴 Q{period} {clock}" if state == "in" else ("FINAL" if state == "post" else "SCHEDULED")
             label = f"{a_abbr} @ {h_abbr} ({status_label})"
+            
+            sit = comp.get("situation", {})
             matchup_options[label] = {
                 "home_abbr": h_abbr,
                 "away_abbr": a_abbr,
@@ -196,8 +198,9 @@ if events:
                 "state": state,
                 "period": period,
                 "clock": clock,
-                "yardLine": comp.get("situation", {}).get("yardLine", 75),
-                "possession": comp.get("situation", {}).get("possession")
+                "yardLine": sit.get("yardLine", 75),
+                "downDistance": sit.get("downDistanceText", "1st & 10"),
+                "possession": sit.get("possession")
             }
 else:
     pairs = WEEKLY_SCHEDULE_BACKUP.get(selected_week, [("KC", "SF"), ("BAL", "PIT"), ("BUF", "MIA"), ("DET", "GB")])
@@ -218,6 +221,7 @@ else:
             "period": 2,
             "clock": "8:30",
             "yardLine": 75,
+            "downDistance": "1st & 10 at Own 25",
             "possession": None
         }
 
@@ -225,8 +229,39 @@ with c_game:
     selected_label = st.selectbox("Select Matchup", list(matchup_options.keys()))
     m = matchup_options[selected_label]
 
+# Determine automatic live ball possession
+auto_poss_home = (m["possession"] == m["home_id"]) if m["possession"] else False
+default_idx = 1 if auto_poss_home else 0
+
 # ---------------------------------------------------------
-# MATCHUP TELEMETRY & POSSESSION TOGGLE
+# 📺 LIVE BROADCAST SCOREBOARD BANNER
+# ---------------------------------------------------------
+away_status = "🏈 " if not auto_poss_home and m["state"] == "in" else ""
+home_status = "🏈 " if auto_poss_home and m["state"] == "in" else ""
+game_state_str = f"🔴 Q{m['period']} {m['clock']}" if m["state"] == "in" else ("FINAL" if m["state"] == "post" else "PRE-GAME")
+
+st.markdown(f"""
+<div style="background: #111622; border: 1px solid #1E293B; border-radius: 10px; padding: 14px 20px; margin: 10px 0 16px 0; display: flex; justify-content: space-between; align-items: center;">
+    <div style="display: flex; align-items: center; gap: 30px;">
+        <div style="text-align: left;">
+            <div style="font-size: 0.85rem; font-weight: 700; color: #94A3B8;">AWAY</div>
+            <div style="font-size: 1.4rem; font-weight: 900; color: #FFFFFF;">{away_status}{m['away_abbr']} <span style="color: #FF4B4B; margin-left: 8px;">{m['away_score']}</span></div>
+        </div>
+        <div style="font-size: 1.2rem; font-weight: 800; color: #475569;">@</div>
+        <div style="text-align: left;">
+            <div style="font-size: 0.85rem; font-weight: 700; color: #94A3B8;">HOME</div>
+            <div style="font-size: 1.4rem; font-weight: 900; color: #FFFFFF;">{home_status}{m['home_abbr']} <span style="color: #FF4B4B; margin-left: 8px;">{m['home_score']}</span></div>
+        </div>
+    </div>
+    <div style="text-align: center; border-left: 1px solid #263346; padding-left: 24px;">
+        <div style="font-size: 0.8rem; font-weight: 800; color: #38BDF8; text-transform: uppercase;">{game_state_str}</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: #E2E8F0;">{m['downDistance']}</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# OFFENSE POSSESSION CONTROLS
 # ---------------------------------------------------------
 col_poss, col_info = st.columns([2, 4])
 
@@ -234,7 +269,7 @@ with col_poss:
     poss_pick = st.radio(
         "Offense on Field (Has Ball)",
         [f"{m['away_name']} ({m['away_abbr']})", f"{m['home_name']} ({m['home_abbr']})"],
-        index=0,
+        index=default_idx,
         horizontal=True
     )
 
@@ -242,7 +277,6 @@ is_home = poss_pick.startswith(m["home_name"])
 off_abbr = m["home_abbr"] if is_home else m["away_abbr"]
 off_name = m["home_name"] if is_home else m["away_name"]
 off_id = m["home_id"] if is_home else m["away_id"]
-
 def_abbr = m["away_abbr"] if is_home else m["home_abbr"]
 score_diff = (m["home_score"] - m["away_score"]) if is_home else (m["away_score"] - m["home_score"])
 
@@ -261,9 +295,9 @@ half_seconds = qtr_seconds + 900 if qtr in [1, 3] else qtr_seconds
 game_seconds = qtr_seconds + (4 - min(qtr, 4)) * 900
 
 with col_info:
-    st.info(f"🏈 **Drive Situation:** **{off_abbr}** Offense vs **{def_abbr}** Defense | Line of Scrimmage: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Margin: **{score_diff:+d}**")
+    st.info(f"🏈 **Drive Situation:** **{off_abbr}** Offense vs **{def_abbr}** Defense | Line: **{field_start}** | Clock: **Q{qtr} {clock_str}** | Offense Margin: **{score_diff:+d}**")
 
-# Run Possession Outcome Model
+# Run Possession Model
 input_df = pd.DataFrame([{
     "yardline_100": yardline_100,
     "half_seconds_remaining": half_seconds,
@@ -286,12 +320,15 @@ elif score_diff >= 8 and qtr >= 3:
     pass_rate = 0.42
 run_rate = 1.0 - pass_rate
 
-# Fetch live offensive roster for chosen team
+# Fetch live offensive roster
 roster = fetch_live_espn_roster(str(off_id))
 wrs = [p for p in roster if p["pos"] == "WR"] if roster else []
 tes = [p for p in roster if p["pos"] == "TE"] if roster else []
 rbs = [p for p in roster if p["pos"] in ["RB", "FB"]] if roster else []
 qbs = [p for p in roster if p["pos"] == "QB"] if roster else []
+
+# Extract model drive TD probability
+prob_drive_td = dict([(r[0], r[1]) for r in results]).get("Touchdown", 0.22)
 
 # ---------------------------------------------------------
 # SUGGESTED VALUE SPOTLIGHTS
@@ -301,6 +338,7 @@ st.markdown(f"### 🔥 Matchup Value Spotlights ({off_abbr} vs {def_abbr})")
 if roster:
     top_wr = wrs[0] if wrs else None
     top_rb = rbs[0] if rbs else None
+    top_qb = qbs[0] if qbs else None
 
     rec_prob_1, rec_prob_2, rush_prob_5, rush_prob_10 = 0.0, 0.0, 0.0, 0.0
 
@@ -339,14 +377,17 @@ if roster:
             st.caption(f"Explosive chunk yardage benchmark vs {def_abbr}.")
 
     with s3:
-        st.warning("📋 **Matchup Game Script**")
-        if score_diff <= -8 and qtr >= 3:
-            st.write(f"• **Trailing {score_diff:+d}:** Pass heavy script (~72% pass lean).")
-        elif score_diff >= 8 and qtr >= 3:
-            st.write(f"• **Protecting Lead {score_diff:+d}:** Run heavy script (~58% rush lean).")
-        else:
-            st.write(f"• **Neutral Script:** Standard balanced playcalling.")
-        st.caption(f"Drive volume: ~{est_plays} plays.")
+        st.warning("⚡ **Anytime / Drive TD Leader**")
+        if top_rb:
+            rb_td_prob = prob_drive_td * 0.45
+            st.markdown(f"**#{top_rb['jersey']} {top_rb['name']} (RB1)**")
+            st.write(f"• **Drive TD Scorer:** **{rb_td_prob * 100:.1f}%** (`{prob_to_american(rb_td_prob)}`)")
+            st.caption("Goal-line and red zone carry share favorite.")
+        elif top_qb:
+            qb_pass_td = prob_drive_td * 0.65
+            st.markdown(f"**#{top_qb['jersey']} {top_qb['name']} (QB1)**")
+            st.write(f"• **1+ Passing TD:** **{qb_pass_td * 100:.1f}%** (`{prob_to_american(qb_pass_td)}`)")
+            st.caption("Drive TD converted through the air.")
 else:
     st.info("Loading active personnel...")
 
@@ -400,15 +441,16 @@ with col_drive:
 with col_divider:
     st.write("")
 
-# === RIGHT PANEL: ALL PLAYER PROPS ===
+# === RIGHT PANEL: ALL EXPANDED PLAYER PROPS ===
 with col_prop:
     st.subheader(f"🎯 {off_abbr} Player Micro-Props")
 
     if not roster:
         st.warning("Connecting to active roster...")
     else:
-        tab_rec, tab_rush = st.tabs(["🏈 Reception Props", "🏃 Rushing Props"])
+        tab_rec, tab_rush, tab_pass, tab_td = st.tabs(["🏈 Receptions & Yds", "🏃 Rushing Props", "🎯 QB Passing", "⚡ Anytime / Drive TD"])
         
+        # 1. RECEPTIONS & RECEIVING YARDS
         with tab_rec:
             pass_options = {}
             for idx, p in enumerate(wrs):
@@ -426,16 +468,25 @@ with col_prop:
             
             exp_targets = est_plays * pass_rate * target_share
             exp_catches = exp_targets * 0.68
+            exp_rec_yds = exp_catches * 11.2
             
-            st.caption(f"Situational Opportunity: **{target_share * 100:.0f}%** Target Share (~{exp_targets:.2f} targets)")
+            st.caption(f"Situational Expectancy: **{target_share * 100:.0f}%** Target Share (~{exp_targets:.2f} targets | ~{exp_rec_yds:.1f} yds)")
 
-            r_col1, r_col2 = st.columns(2)
+            r1, r2 = st.columns(2)
             prob_1_catch = 1.0 - math.exp(-exp_catches)
-            r_col1.metric("1+ Reception on Drive", f"{prob_1_catch * 100:.1f}%", f"Fair: {prob_to_american(prob_1_catch)}")
+            r1.metric("1+ Reception", f"{prob_1_catch * 100:.1f}%", f"Fair: {prob_to_american(prob_1_catch)}")
 
             prob_2_catch = max(0.0, min(0.99, 1.0 - math.exp(-exp_catches) * (1.0 + exp_catches)))
-            r_col2.metric("2+ Receptions on Drive", f"{prob_2_catch * 100:.1f}%", f"Fair: {prob_to_american(prob_2_catch)}")
+            r2.metric("2+ Receptions", f"{prob_2_catch * 100:.1f}%", f"Fair: {prob_to_american(prob_2_catch)}")
 
+            r3, r4 = st.columns(2)
+            prob_10_rec = min(0.96, 1.0 - math.exp(-exp_catches * 0.65))
+            r3.metric("10+ Receiving Yds", f"{prob_10_rec * 100:.1f}%", f"Fair: {prob_to_american(prob_10_rec)}")
+
+            prob_20_rec = min(0.90, 1.0 - math.exp(-exp_catches * 0.38))
+            r4.metric("20+ Receiving Yds", f"{prob_20_rec * 100:.1f}%", f"Fair: {prob_to_american(prob_20_rec)}")
+
+        # 2. RUSHING PROPS
         with tab_rush:
             rush_options = {}
             for idx, p in enumerate(rbs):
@@ -449,11 +500,68 @@ with col_prop:
             carry_share = rush_options[chosen_rusher]
             
             exp_carries = est_plays * run_rate * carry_share
-            st.caption(f"Situational Opportunity: **{carry_share * 100:.0f}%** Carry Share (~{exp_carries:.2f} carries)")
+            st.caption(f"Situational Expectancy: **{carry_share * 100:.0f}%** Carry Share (~{exp_carries:.2f} carries)")
 
-            ru_col1, ru_col2 = st.columns(2)
+            ru1, ru2 = st.columns(2)
             prob_5_rush = min(0.98, 1.0 - math.exp(-exp_carries * 0.72))
-            ru_col1.metric("5+ Rush Yds on Drive", f"{prob_5_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_5_rush)}")
+            ru1.metric("5+ Rush Yds", f"{prob_5_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_5_rush)}")
 
             prob_10_rush = min(0.95, 1.0 - math.exp(-exp_carries * 0.42))
-            ru_col2.metric("10+ Rush Yds on Drive", f"{prob_10_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_10_rush)}")
+            ru2.metric("10+ Rush Yds", f"{prob_10_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_10_rush)}")
+
+            ru3, ru4 = st.columns(2)
+            prob_15_rush = min(0.90, 1.0 - math.exp(-exp_carries * 0.28))
+            ru3.metric("15+ Rush Yds", f"{prob_15_rush * 100:.1f}%", f"Fair: {prob_to_american(prob_15_rush)}")
+
+            prob_rush_td = min(0.85, prob_drive_td * (carry_share * 0.70))
+            ru4.metric("Rush TD on Drive", f"{prob_rush_td * 100:.1f}%", f"Fair: {prob_to_american(prob_rush_td)}")
+
+        # 3. QB PASSING PROPS
+        with tab_pass:
+            qb_options = [f"#{p['jersey']} {p['name']} (QB)" for p in qbs] if qbs else ["#1 QB Starter"]
+            chosen_qb = st.selectbox("Select Quarterback", qb_options, index=0)
+            
+            exp_pass_attempts = est_plays * pass_rate
+            exp_completions = exp_pass_attempts * 0.65
+            exp_pass_yds = exp_completions * 10.8
+            
+            st.caption(f"Drive Passing Volume: ~{exp_pass_attempts:.1f} Attempts | ~{exp_pass_yds:.1f} Projected Passing Yards")
+
+            q1, q2 = st.columns(2)
+            prob_15_pass = min(0.98, 1.0 - math.exp(-exp_completions * 0.70))
+            q1.metric("15+ Passing Yards", f"{prob_15_pass * 100:.1f}%", f"Fair: {prob_to_american(prob_15_pass)}")
+
+            prob_25_pass = min(0.94, 1.0 - math.exp(-exp_completions * 0.45))
+            q2.metric("25+ Passing Yards", f"{prob_25_pass * 100:.1f}%", f"Fair: {prob_to_american(prob_25_pass)}")
+
+            q3, q4 = st.columns(2)
+            prob_pass_td = min(0.85, prob_drive_td * 0.68)
+            q3.metric("1+ Passing TD on Drive", f"{prob_pass_td * 100:.1f}%", f"Fair: {prob_to_american(prob_pass_td)}")
+
+            prob_int = min(0.40, max(0.02, 1.0 - math.exp(-exp_pass_attempts * 0.028)))
+            q4.metric("Interception Thrown", f"{prob_int * 100:.1f}%", f"Fair: {prob_to_american(prob_int)}")
+
+        # 4. ANYTIME / DRIVE TOUCHDOWN PROPS
+        with tab_td:
+            all_td_options = []
+            for p in rbs:
+                all_td_options.append((f"#{p['jersey']} {p['name']} (RB)", 0.38))
+            for p in wrs:
+                all_td_options.append((f"#{p['jersey']} {p['name']} (WR)", 0.22))
+            for p in tes:
+                all_td_options.append((f"#{p['jersey']} {p['name']} (TE)", 0.15))
+            for p in qbs:
+                all_td_options.append((f"#{p['jersey']} {p['name']} (QB - Rush)", 0.10))
+
+            if all_td_options:
+                chosen_scorer = st.selectbox("Select TD Candidate", [opt[0] for opt in all_td_options], index=0)
+                td_weight = next(opt[1] for opt in all_td_options if opt[0] == chosen_scorer)
+                
+                drive_td_prob = prob_drive_td * td_weight
+                # Anytime game TD projection (roughly 6.5 drives per team per game)
+                game_td_prob = 1.0 - (1.0 - drive_td_prob) ** 6.0
+                
+                td_col1, td_col2 = st.columns(2)
+                td_col1.metric("Touchdown THIS Drive", f"{drive_td_prob * 100:.1f}%", f"Fair: {prob_to_american(drive_td_prob)}")
+                td_col2.metric("Anytime Game TD (Full Game)", f"{game_td_prob * 100:.1f}%", f"Fair: {prob_to_american(game_td_prob)}")
+                st.caption(f"Implied team drive touchdown baseline: {prob_drive_td * 100:.1f}%.")
