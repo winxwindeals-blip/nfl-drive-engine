@@ -79,7 +79,7 @@ WEEKLY_SCHEDULE_BACKUP = {
 @st.cache_data(ttl=15)
 def fetch_week_schedule(week_num: int):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=2024&seasontype=2&week={week_num}"
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?seasontype=2&week={week_num}"
     try:
         r = requests.get(url, headers=headers, timeout=5)
         if r.status_code == 200:
@@ -90,37 +90,78 @@ def fetch_week_schedule(week_num: int):
         pass
     return []
 
-@st.cache_data(ttl=1800)
-def fetch_live_espn_roster(team_id: str):
+@st.cache_data(ttl=600)
+def fetch_live_active_depthchart(team_id: str):
+    """
+    Pulls strictly ACTIVE starters and backups from ESPN's live depth chart.
+    Eliminates historical players who no longer play for the team.
+    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/json"
     }
-    endpoints = [
-        f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster",
-        f"https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster"
-    ]
-    for url in endpoints:
-        try:
-            r = requests.get(url, headers=headers, timeout=5)
-            if r.status_code == 200:
-                data = r.json()
-                athletes_groups = data.get("athletes", [])
-                skill_players = []
-                target_positions = {"QB", "RB", "WR", "TE", "FB"}
-                for group in athletes_groups:
-                    for ath in group.get("items", []):
-                        pos = ath.get("position", {}).get("abbreviation", "").upper()
-                        if pos in target_positions:
+    url = f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/depthcharts"
+    
+    try:
+        r = requests.get(url, headers=headers, timeout=6)
+        if r.status_code == 200:
+            data = r.json()
+            items = data.get("depthchart", [])
+            skill_players = []
+            seen_names = set()
+            
+            target_map = {
+                "quarterback": "QB", "qb": "QB",
+                "running back": "RB", "rb": "RB",
+                "wide receiver": "WR", "wr": "WR",
+                "tight end": "TE", "te": "TE",
+                "fullback": "FB", "fb": "FB"
+            }
+            
+            for grp in items:
+                pos_name = grp.get("name", "").lower()
+                matched_pos = None
+                for k, v in target_map.items():
+                    if k in pos_name:
+                        matched_pos = v
+                        break
+                
+                if matched_pos:
+                    for ath_entry in grp.get("athletes", []):
+                        ath = ath_entry.get("athlete", ath_entry)
+                        name = ath.get("displayName") or ath.get("fullName")
+                        if name and name not in seen_names:
+                            seen_names.add(name)
                             skill_players.append({
-                                "name": ath.get("fullName") or ath.get("displayName") or "Player",
-                                "pos": pos,
+                                "name": name,
+                                "pos": matched_pos,
                                 "jersey": str(ath.get("jersey", "--"))
                             })
-                if skill_players:
-                    return skill_players
-        except Exception:
-            continue
+            if skill_players:
+                return skill_players
+    except Exception:
+        pass
+
+    # Fallback to current season roster endpoint if depth chart times out
+    try:
+        r2 = requests.get(f"https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/{team_id}/roster", headers=headers, timeout=5)
+        if r2.status_code == 200:
+            data = r2.json()
+            skill_players = []
+            for grp in data.get("athletes", []):
+                for ath in grp.get("items", []):
+                    pos = ath.get("position", {}).get("abbreviation", "").upper()
+                    if pos in {"QB", "RB", "WR", "TE"}:
+                        skill_players.append({
+                            "name": ath.get("fullName") or ath.get("displayName") or "Player",
+                            "pos": pos,
+                            "jersey": str(ath.get("jersey", "--"))
+                        })
+            if skill_players:
+                return skill_players
+    except Exception:
+        pass
+
     return []
 
 # ---------------------------------------------------------
@@ -150,7 +191,7 @@ st.markdown("""
       </span>
     </div>
     <p style="margin: 3px 0 0 0; padding: 0; font-size: 0.78rem; font-weight: 700; color: #7C8BA1; letter-spacing: 1.3px; text-transform: uppercase;">
-      Real-Time Live Scoreboard & Advanced Micro-Prop Analytics
+      Active Depth-Chart Synced Live Scoreboard & Micro-Prop Analytics
     </p>
   </div>
 </div>
@@ -214,7 +255,7 @@ else:
             "home_name": h_info["name"],
             "away_name": a_info["name"],
             "home_id": h_info["id"],
-            "away_id": h_info["id"],
+            "away_id": a_info["id"],
             "home_score": 0,
             "away_score": 0,
             "state": "pre",
@@ -229,7 +270,6 @@ with c_game:
     selected_label = st.selectbox("Select Matchup", list(matchup_options.keys()))
     m = matchup_options[selected_label]
 
-# Determine automatic live ball possession
 auto_poss_home = (m["possession"] == m["home_id"]) if m["possession"] else False
 default_idx = 1 if auto_poss_home else 0
 
@@ -312,7 +352,6 @@ probs = model.predict_proba(input_df)[0]
 results = sorted(zip(classes, probs), key=lambda x: x[1], reverse=True)
 est_plays = round(max(3.0, 3.2 + (yardline_100 / 100.0) * 3.8), 1)
 
-# Dynamic playcalling lean
 pass_rate = 0.58
 if score_diff <= -8 and qtr >= 3:
     pass_rate = 0.72
@@ -320,14 +359,13 @@ elif score_diff >= 8 and qtr >= 3:
     pass_rate = 0.42
 run_rate = 1.0 - pass_rate
 
-# Fetch live offensive roster
-roster = fetch_live_espn_roster(str(off_id))
+# Fetch live depth chart (guarantees current active roster)
+roster = fetch_live_active_depthchart(str(off_id))
 wrs = [p for p in roster if p["pos"] == "WR"] if roster else []
 tes = [p for p in roster if p["pos"] == "TE"] if roster else []
 rbs = [p for p in roster if p["pos"] in ["RB", "FB"]] if roster else []
 qbs = [p for p in roster if p["pos"] == "QB"] if roster else []
 
-# Extract model drive TD probability
 prob_drive_td = dict([(r[0], r[1]) for r in results]).get("Touchdown", 0.22)
 
 # ---------------------------------------------------------
@@ -389,7 +427,7 @@ if roster:
             st.write(f"• **1+ Passing TD:** **{qb_pass_td * 100:.1f}%** (`{prob_to_american(qb_pass_td)}`)")
             st.caption("Drive TD converted through the air.")
 else:
-    st.info("Loading active personnel...")
+    st.info("Loading active depth chart...")
 
 st.divider()
 
@@ -558,7 +596,6 @@ with col_prop:
                 td_weight = next(opt[1] for opt in all_td_options if opt[0] == chosen_scorer)
                 
                 drive_td_prob = prob_drive_td * td_weight
-                # Anytime game TD projection (roughly 6.5 drives per team per game)
                 game_td_prob = 1.0 - (1.0 - drive_td_prob) ** 6.0
                 
                 td_col1, td_col2 = st.columns(2)
